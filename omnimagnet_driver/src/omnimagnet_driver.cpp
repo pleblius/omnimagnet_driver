@@ -329,6 +329,8 @@ void OmnimagnetDriverNode::smcCallback(
     auto vector = request->dipole_vec;
 
     if (omnimagnets.count(id) == 0) {
+        RCLCPP_WARN(this->get_logger(), "Omnimagnet %lu not found: ", id);
+
         response->error = true;
         response->error_desc = "Invalid magnet ID.";
 
@@ -409,6 +411,8 @@ void OmnimagnetDriverNode::mmcCallback(
 
     // Check for size mismatch
     if (strengths.size() != 1 && strengths.size() != ids.size()) {
+        RCLCPP_WARN(this->get_logger(), "Request size mismatch.");
+
         response->error = true;
         response->error_desc = "Dipole strengths list size mismatch.";
 
@@ -417,6 +421,8 @@ void OmnimagnetDriverNode::mmcCallback(
     }
 
     if (vectors.size() != 1 && vectors.size() != ids.size()) {
+        RCLCPP_WARN(this->get_logger(), "Request size mismatch.");
+
         response->error = true;
         response->error_desc = "Dipole vectors list size mismatch.";
 
@@ -426,8 +432,10 @@ void OmnimagnetDriverNode::mmcCallback(
 
     for (auto& id : ids) {
         if (omnimagnets.count(id) == 0) {
+            RCLCPP_WARN(this->get_logger(), "Omnimagnet %lu not found: ", id);
+
             response->error = true;
-            response->error_desc = "Invalid magnet ID.";
+            response->error_desc = "Invalid magnet ID: " + std::to_string(id);
     
             timeoutTimer->reset();
             return;
