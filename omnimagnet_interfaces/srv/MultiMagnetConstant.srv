@@ -1,0 +1,7 @@
+uint64[] omnimagnets #ID associated with desired omnimagnets
+Vector3[] dipole_vecs #Index-associated dipole vectors - if length of 1, is applied universally
+float64[] dipole_strengths #Index-associated dipole strengths - if length of 1, is applied universally
+float64 duration #Optional
+---
+bool error #true if an error prevented driver from implementing desired control
+string error_desc #Description of failure if error is true

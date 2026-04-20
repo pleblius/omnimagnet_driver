@@ -1,0 +1,9 @@
+uint64 omnimagnet #Desired omnimagnet ID
+Vector3 rotation_vector
+float64 rotation_freq
+float64 dipole_strength
+Vector3 starting_vector #Optional. Initial dipole vector
+float64 duration #Optional
+---
+bool error #true if an error prevented driver from implementing desired control
+string error_desc #Description of failure if error is true

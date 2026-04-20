@@ -1,0 +1,1 @@
+string msg #Contains information about previous run.

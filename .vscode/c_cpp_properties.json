@@ -7,8 +7,9 @@
       },
       "includePath": [
         "/opt/ros/humble/include/**",
-        "/home/omnimagnet/ros2_ws/src/omnimagnet_driver/include/**",
-        "/usr/include/**"
+        "/home/omnimagnet/omnimagnets/src/omnimagnet_driver/include/**",
+        "/usr/include/**",
+        "/home/tylerwilcox/omnimagnets/install/omnimagnet_interfaces/include/**"
       ],
       "name": "ros2",
       "intelliSenseMode": "gcc-x64",

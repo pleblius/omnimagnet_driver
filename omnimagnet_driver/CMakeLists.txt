@@ -9,12 +9,14 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_library(COMEDI_LIB comedi PATHS /usr/lib)
+find_package(example_interfaces REQUIRED)
+find_package(omnimagnet_interfaces REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 add_executable(omnimagnet_driver 
   src/omnimagnet_driver.cpp
-  src/omnimagnet.cpp
-  src/type.cpp)
-ament_target_dependencies(omnimagnet_driver rclcpp)
+  src/omnimagnet.cpp)
+ament_target_dependencies(omnimagnet_driver rclcpp example_interfaces geometry_msgs omnimagnet_interfaces)
 target_link_libraries(omnimagnet_driver ${COMEDI_LIB})
 
 install(TARGETS
