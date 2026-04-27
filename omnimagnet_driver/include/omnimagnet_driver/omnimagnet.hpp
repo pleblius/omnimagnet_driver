@@ -23,6 +23,22 @@ Ver 1.0 by Ashkan July-2019
 Update  by Tyler Wilcox April 2026
 	Moved type.hpp functions into omnimagnet.hpp
 *****************************************************/
+
+/* Set of orthonormal vectors representing a rotation plane */
+struct Basis {
+	Eigen::Vector3d u;
+	Eigen::Vector3d v;
+
+	// Takes linearly independent vectors and creates an orthonormal set of bases
+	Basis(const Eigen::Vector3d &u_, const Eigen::Vector3d &v_) {
+		u = u_.normalized();
+
+		v = (v_ - u * u.dot(v_)).normalized();
+	}
+
+	Basis() {}
+};
+
 class OmniMagnet {
 	private:
 		int subdev = 0;     /* change this to your input subdevice */
@@ -51,6 +67,13 @@ class OmniMagnet {
 		std::chrono::high_resolution_clock::time_point ref_time, current_time;
 	public:
 		int ID{0};
+		double freq;
+		double strength;
+		double offset;
+		double theta;
+    	Eigen::Vector3d dipole;
+		Eigen::Vector3d rotVector;
+		Basis rotBasis;
 
 		OmniMagnet();
 		OmniMagnet(double wire_width, double wire_len_in, double wire_len_mid, double wire_len_out, double core_size, int pinin, int pinmid, int pinout,bool estimate, comedi_t * card);
@@ -67,8 +90,8 @@ class OmniMagnet {
 		lsampl_t CurrentD2A(double);
 		double max_dipole_mag;
 		void RotatingDipole(Eigen::Vector3d init_dipole, Eigen::Vector3d axis_rot, double freq, int dur);
-		static Eigen::MatrixXd AshkanPseudoinverse(Eigen::MatrixXd, double);
-		static Eigen::MatrixXd Pseudoinverse(Eigen::MatrixXd);
+		// [[maybe_unused]] static Eigen::MatrixXd AshkanPseudoinverse(Eigen::MatrixXd, double);
+		// [[maybe_unused]] static Eigen::MatrixXd Pseudoinverse(Eigen::MatrixXd);
 
 		template <typename inType, typename outType>
 		static outType map_range(inType value, inType val_min, inType val_max, outType range_min, outType range_max) {

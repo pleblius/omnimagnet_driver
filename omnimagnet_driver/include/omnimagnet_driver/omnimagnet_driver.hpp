@@ -48,6 +48,12 @@ public:
     void shutdown();
 
 private:
+    // Operating Parameters
+    double freq;
+    double strength;
+
+    bool running;
+
     // Containers
     std::map<int, OmniMagnet> omnimagnets;
     std::vector<OmniMagnet*> activeMagnets;
@@ -66,7 +72,7 @@ private:
     rclcpp::TimerBase::SharedPtr spinTimer;
     rclcpp::TimerBase::SharedPtr durationTimer;
 
-    std::chrono::_V2::system_clock::time_point startTime;
+    std::chrono::_V2::steady_clock::time_point startTime;
 
     // D2A card
     comedi_t *D2A;
@@ -108,8 +114,9 @@ private:
         const omnimagnet_interfaces::srv::MultiMagnetRotation::Response::SharedPtr
     );
     void resetCallback(
-        const omnimagnet_interfaces::srv::DriverReset::Request::SharedPtr,
+        [[maybe_unused]] const omnimagnet_interfaces::srv::DriverReset::Request::SharedPtr,
         const omnimagnet_interfaces::srv::DriverReset::Response::SharedPtr
     );
 
+    Basis makeBasis(const Eigen::Vector3d &axis);
 };
