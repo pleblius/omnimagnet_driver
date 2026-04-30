@@ -137,61 +137,64 @@ void OmnimagnetDriverNode::setupMagnets() {
  * 
  */
 void OmnimagnetDriverNode::shutdown() {
+    static std::atomic_bool already_shutdown{false};
+
+    if (already_shutdown.exchange(true)) {
+        return;
+    }
+    std::cout << "Beginning Shutdown" << std::endl;
+
     controlThreadRunning.store(false, std::memory_order_release);
     if (controlThread.joinable()) {
         controlThread.join();
     }
 
+    if (D2A == nullptr) {
+        std::cerr << "D2A was null during shutdown:" << std::endl <<
+        "Hardware may not have been properly initialized" << std::endl;
+
+        return;
+    }
+
+    bool magnetFail = false;
     for (auto & [id, omni] : omnimagnets) {
         int retval = omni.SetCurrent(offVector);
 
         if (retval < 0) {
-            RCLCPP_WARN(this->get_logger(), "Magnet %d failed to turn off.", id);
-
-            auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-            msg.error_desc = "Failed to disable current on magnet " + std::to_string(id) + ". Continuing shutdown.\n";
-            msg.shutdown = false;
-            errorPublisher->publish(msg);
+            std::cerr << "Magnet " << id << 
+                " failed to turn off." << std::endl;
+            magnetFail = true;
         }
         else {
-            RCLCPP_INFO(this->get_logger(), "Magnet %d turned off.", id);
+            std::cout << "Magnet " << id << 
+            " turned off." << std::endl;
         }
     }
 
-    RCLCPP_INFO(this->get_logger(), "All magnets turned off.");
+    if (!magnetFail) {
+        std::cout << "All magnets turned off." << std::endl;
+    }
+    else {
+        std::cerr << "Failed to shut down all magnets." << std::endl;
+    }
 
-    bool fail = false;
+    bool pinFail = false;
     int retval = comedi_data_write(D2A, subdev, 25, 0, AREF_GROUND, 16383.0*2./4.);
     if (retval < 0) {
-        RCLCPP_WARN(this->get_logger(), "Failed to shut down D2A Pin 25!");
-        fail = true;
-
-        auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-        msg.error_desc = "Failed to shut down pin 25.\n";
-        msg.shutdown = false;
-        errorPublisher->publish(msg);
+        std::cerr << "Failed to shut down D2A Pin 25!" << std::endl;
+        pinFail = true;
     }
     retval = comedi_data_write(D2A, subdev, 26, 0, AREF_GROUND, 16383.0*2./4.);
     if (retval < 0) {
-        RCLCPP_WARN(this->get_logger(), "Failed to shut down D2A Pin 26!");
-        fail = true;
-
-        auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-        msg.error_desc = "Failed to shut down pin 26.\n";
-        msg.shutdown = false;
-        errorPublisher->publish(msg);
+        std::cerr << "Failed to shut down D2A Pin 26!" << std::endl;
+        pinFail = true;
     }
 
-    if (!fail) {
-        RCLCPP_INFO(this->get_logger(), "Successfully shut down hardware.");
+    if (!pinFail) {
+        std::cout << "Successfully shut down write pins." << std::endl;
     }
     else {
-        RCLCPP_ERROR(this->get_logger(), "Failed to shut down hardware, use emergency stop!");
-
-        auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-        msg.error_desc = "Failed to properly shut down hardware! Use Emergency Stop!";
-        msg.shutdown = true;
-        errorPublisher->publish(msg);
+        std::cerr << "Failed to shut down write pins, use emergency stop!" << std::endl;
     }
 }
 
@@ -242,7 +245,7 @@ void OmnimagnetDriverNode::durationCallback() {
 
     msg.msg = oss.str();
 
-    RCLCPP_INFO(this->get_logger(), "Run finished at: %s", oss.str().c_str());
+    RCLCPP_INFO(this->get_logger(), "%s", oss.str().c_str());
 
     finishedPublisher->publish(msg);
 
@@ -517,13 +520,13 @@ void OmnimagnetDriverNode::mmcCallback(
         // TODO: Parameterize default duration
     }
 
-    RCLCPP_INFO(this->get_logger(), 
-        "Beginning Operation\n"
-        "Multiple Magnets\n"
-        "Mode: Constant Dipole\n"
-        "Duration %.1f s\n",
-        duration
-    );
+    std::stringstream logString;
+
+    logString 
+        << "Beginning Operation" << std::endl
+        << "Multiple Magnets" << std::endl
+        << "Mode: Constant Dipole" << std::endl
+        << "Duration: " << duration << " s" << std::endl;
 
     // Iterate through lists
     for (std::size_t i = 0; i < ids.size(); ++i) {
@@ -566,19 +569,22 @@ void OmnimagnetDriverNode::mmcCallback(
             return;
         }
         dipole_vector.normalize();
-        
-        RCLCPP_INFO(this->get_logger(), 
-            "Magnet: %lu\n"
-            "Dipole: <%.3f, %.3f, %.3f>\n"
-            "Strength: %.2f",
-            id, vector.x, vector.y, vector.z, strength
-        );
+
+        logString 
+            << "Magnet: " << id << std::endl
+            << "Dipole: <"
+                << vector.x << ", "
+                << vector.y << ", "
+                << vector.z << ">" << std::endl
+            << "Strength: " << strength << std::endl;
 
         {
             std::lock_guard<std::mutex> lock(commandMutex);
             activeCommands[i] = {&omni, 0, strength, 0, makeBasis(dipole_vector), dipole_vector};
         }
     }
+
+    RCLCPP_INFO(this->get_logger(), logString.str().c_str());
 
     startTime = std::chrono::steady_clock::now();
     activeCommandCount.store(ids.size(), std::memory_order_release);
@@ -684,13 +690,13 @@ void OmnimagnetDriverNode::mmrCallback(
         // TODO: Parameterize default duration
     }
 
-    RCLCPP_INFO(this->get_logger(), 
-        "Beginning Operation\n"
-        "Multiple Magnets\n"
-        "Mode: Rotating Dipole\n"
-        "Duration %.1f s\n",
-        duration
-    );
+    std::stringstream logString;
+
+    logString 
+        << "Beginning Operation" << std::endl
+        << "Multiple Magnets" << std::endl
+        << "Mode: Rotating Dipole" << std::endl
+        << "Duration: " << duration << " s" << std::endl;
 
     // Iterate through lists
     for (std::size_t i = 0; i < ids.size(); ++i) {
@@ -744,17 +750,18 @@ void OmnimagnetDriverNode::mmrCallback(
             std::lock_guard<std::mutex> lock (commandMutex);
             activeCommands[i] = {omni, freq, strength, offset, makeBasis(rotVec), rotVec};
         }
-
-        RCLCPP_INFO(this->get_logger(), 
-            "Magnet: %lu\n"
-            "Dipole: <%.3f, %.3f, %.3f>\n"
-            "Strength: %.2f\n"
-            "Frequency: %.2f",
-            id, rotationVector.x, rotationVector.y, rotationVector.z, strength, freq
-        );
+        logString
+            << "Magnet: " << id << std::endl
+            << "Dipole: <"
+                << rotationVector.x << ", "
+                << rotationVector.y << ", "
+                << rotationVector.z << ">" << std::endl
+            << "Strength: " << strength << std::endl
+            << "Frequency: " << freq << std::endl;
     }
 
-    
+    RCLCPP_INFO(this->get_logger(), logString.str().c_str());
+
     startTime = std::chrono::steady_clock::now();
     activeCommandCount.store(ids.size(), std::memory_order_release);
     experimentRunning.store(true, std::memory_order_release);
