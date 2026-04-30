@@ -67,13 +67,6 @@ class OmniMagnet {
 		std::chrono::high_resolution_clock::time_point ref_time, current_time;
 	public:
 		int ID{0};
-		double freq;
-		double strength;
-		double offset;
-		double theta;
-    	Eigen::Vector3d dipole;
-		Eigen::Vector3d rotVector;
-		Basis rotBasis;
 
 		OmniMagnet();
 		OmniMagnet(double wire_width, double wire_len_in, double wire_len_mid, double wire_len_out, double core_size, int pinin, int pinmid, int pinout,bool estimate, comedi_t * card);

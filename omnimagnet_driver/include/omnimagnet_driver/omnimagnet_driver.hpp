@@ -40,6 +40,16 @@ omnimagnet_driver.hpp   defines a class which inherits from the Ros2 node class.
 Ver 0.1 by Tyler Wilcox, April 2026
 tyler.c.wilcox@utah.edu		
 *****************************************************/
+struct ActiveMagnetCommand
+{
+    OmniMagnet* omni;
+    double freq;
+    double strength;
+    double offset;
+    Basis basis;
+    Eigen::Vector3d vector;
+};
+
 class OmnimagnetDriverNode : public rclcpp::Node {
 
 public:
@@ -49,14 +59,18 @@ public:
 
 private:
     // Operating Parameters
-    double freq;
-    double strength;
+    const static std::size_t maxMagnets{5};
 
-    bool running;
+    std::thread controlThread;
+    std::atomic<bool> experimentRunning{false};
+    std::atomic<bool> controlThreadRunning{false};
+
+    std::mutex commandMutex;
 
     // Containers
     std::map<int, OmniMagnet> omnimagnets;
-    std::vector<OmniMagnet*> activeMagnets;
+    std::array<ActiveMagnetCommand, maxMagnets> activeCommands;
+    std::atomic<std::size_t> activeCommandCount{0};
 
     // Ros2 Agents
     rclcpp::Publisher<omnimagnet_interfaces::msg::ErrorMessage>::SharedPtr errorPublisher;
@@ -69,7 +83,6 @@ private:
     rclcpp::Service<omnimagnet_interfaces::srv::DriverReset>::SharedPtr resetServer;
     
     rclcpp::TimerBase::SharedPtr timeoutTimer;
-    rclcpp::TimerBase::SharedPtr spinTimer;
     rclcpp::TimerBase::SharedPtr durationTimer;
 
     std::chrono::_V2::steady_clock::time_point startTime;
@@ -88,11 +101,13 @@ private:
     Eigen::Vector3d offVector;
 
     /******* FUNCTIONS *******/
+    void buildTimers();
+    void buildPublishers();
+    void buildServices();
     void setupHardware();
     void setupMagnets();
 
     // Timer callbacks
-    void spinCallback();
     void timeoutCallback();
     void durationCallback();
 
@@ -117,6 +132,8 @@ private:
         [[maybe_unused]] const omnimagnet_interfaces::srv::DriverReset::Request::SharedPtr,
         const omnimagnet_interfaces::srv::DriverReset::Response::SharedPtr
     );
+
+    void controlLoop();
 
     Basis makeBasis(const Eigen::Vector3d &axis);
 };
