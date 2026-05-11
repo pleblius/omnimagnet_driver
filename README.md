@@ -146,6 +146,15 @@ Will timeout after 60 seconds of not receiving any topics.
 
 ---
 
+# Vector3
+A copy of ROS2's Vector3 interface type to simplify dependencies
+
+| Field | Type |
+|------|------|
+| x | float64 |
+| y | float64 |
+| z | float64 |
+
 # Published Topics
 
 ## Driver Errors
@@ -156,9 +165,15 @@ Topic:
 /driver_errors
 ```
 
+
 Type:
 
 `omnimagnet_interfaces/msg/ErrorMessage`
+
+| Field | Type | Description |
+|------|------|-------------|
+| error_desc | string | Brief description of cause of error |
+| shutdown | bool | True if the driver initiated a shutdown |
 
 Reports errors that prevent proper driver operation and whether a shutdown has been initiated.
 
@@ -183,11 +198,11 @@ Type:
 
 `omnimagnet_interfaces/msg/FinishedMessage`
 
+| Field | Type | Description |
+|------|------|-------------|
+| msg | string | Completion timestamp |
+
 Published when an experiment completes successfully.
-
-Contains:
-
-- Completion timestamp
 
 ---
 
@@ -373,7 +388,7 @@ Type:
 |------|------|--------------|
 | omnimagnets | uint64[] | List of Magnet IDs |
 | rotation_vectors | Vector3[] | Index-associated rotation unit vectors |
-| rotation_freqs | float64[] | Index-associated rotation frequencies (Hz)
+| rotation_freqs | float64[] | Index-associated rotation frequencies (Hz) |
 | dipole_strengths | float64[] | Index-associated dipole strengths (Am^2) |
 | phase_offsets | float64[] | Index-associated rotation offset (deg) |
 | duration | float64 | (Optional) Runtime (sec) |
@@ -592,8 +607,6 @@ Current code still has several planned improvements:
 - [ ] Parameterize timeout values
 - [ ] Parameterize control loop frequency
 - [ ] Add launch file
-- [ ] Add diagnostics topic
-- [ ] Add hardware self-test service
 
 ---
 
