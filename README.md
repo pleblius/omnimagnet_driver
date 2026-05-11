@@ -146,7 +146,29 @@ Will timeout after 60 seconds of not receiving any topics.
 
 ---
 
-# Vector3
+
+# Magnet IDs
+
+Currently configured:
+
+| ID | Description |
+|----|-------------|
+| 1 | Left Upper |
+| 2 | Center Upper |
+| 3 | Right Upper |
+| 4 | Right Lower |
+| 5 | Left Lower |
+
+(Upper corresponds to north)
+
+ID 6 is reserved but disabled.
+
+---
+
+# Interfaces
+
+## Vector 3
+
 A copy of ROS2's Vector3 interface type to simplify dependencies
 
 | Field | Type |
@@ -493,24 +515,6 @@ Operations cannot be run simultaneously; if a new operation is desired before th
 ```bash
 ros2 service call /reset_driver omnimagnet_interfaces/srv/DriverReset "{}"
 ```
-
----
-
-# Magnet IDs
-
-Currently configured:
-
-| ID | Description |
-|----|-------------|
-| 1 | Left Upper |
-| 2 | Center Upper |
-| 3 | Right Upper |
-| 4 | Right Lower |
-| 5 | Left Lower |
-
-(Upper corresponds to north)
-
-ID 6 is reserved but disabled.
 
 ---
 
