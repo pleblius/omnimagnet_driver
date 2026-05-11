@@ -415,13 +415,13 @@ Type:
 
 ### Phase Calculation
 - Initial dipole vector is calculated by crossing the `x` vector with the rotation unit vector `omega`
- - If `x` and `omega` are nearly parallel, the `y` vector is used instead
+    - If `x` and `omega` are nearly parallel, the `y` vector is used instead
 - Phase shift represents movement in the direction of rotation from this initial vector by `phase_offset` degrees
 - If rotation is in the same direction, use identical rotation vectors with same-signed frequencies
 - For opposed rotation:
- - Use identical rotation vectors with opposite-signed frequencies (Both vectors will have the same 0-phase angle)
- - Use opposed rotation vectors with same-signed frequencies (Vectors will have opposite 0-phase angle)
-  - Identical to using identical rotation vectors with opposite-signed frequencies and a phase-shift of 180 degrees
+    - Use identical rotation vectors with opposite-signed frequencies (Both vectors will have the same 0-phase angle)
+    - Use opposed rotation vectors with same-signed frequencies (Vectors will have opposite 0-phase angle)
+        - Identical to using identical rotation vectors with opposite-signed frequencies and a phase-shift of 180 degrees
 
 ### Example
 
