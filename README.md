@@ -35,15 +35,18 @@ The driver supports:
 
 ---
 
-## Hardware Requirements
+## Setup
 
-This driver currently assumes:
+This code is built to run using:
+
+### OS
+- Ubuntu Jammy 22.04
 
 ### DAQ Board
 - **Advantech PCI-1724**
-- Accessed through `comedilib`
+- Accessed using `comedilib`
 
-### Device Node
+### Device Access
 Expected DAQ device:
 
 ```bash
@@ -61,6 +64,16 @@ The driver automatically configures:
 
 These are initialized to **75% output** during startup.
 
+### Operating Pins
+
+| Omnimagnet | Inner Pin | Middle Pin | Outer Pin |
+|------------|-----------|------------|-----------|
+|     1      |     2     |      0     |     18    |
+|     2      |     3     |     11     |     19    |
+|     3      |     4     |     12     |     20    |
+|     4      |     5     |     13     |     21    |
+|     5      |     6     |     14     |     22    |
+
 ---
 
 ## Dependencies
@@ -75,6 +88,10 @@ These are initialized to **75% output** during startup.
 - `comedilib`
 - Eigen3
 - pthread
+
+### Code Dependencies
+- omnimagnet
+- omnimagnet_interfaces
 
 Install comedi:
 
@@ -98,6 +115,18 @@ Node name:
 omnimagnet_driver
 ```
 
+Contained in:
+```
+omnimagnet_driver/src/omnimagnet_driver.cpp
+```
+
+It relies on code contained in:
+```
+omnimagnet_driver/include/omnimagnet_driver/omnimagnet_driver.hpp
+omnimagnet_driver/include/omnimagnet_driver/omnimagnet.hpp
+omnimagnet_driver/src/omnimagnet.cpp
+```
+
 ---
 
 ## Running
@@ -107,6 +136,13 @@ Launch the driver:
 ```bash
 ros2 run omnimagnet_driver omnimagnet_driver
 ```
+
+### Domain ID
+
+Defaults to domain ID 
+`2`
+
+Will timeout after 60 seconds of not receiving any topics.
 
 ---
 
@@ -124,7 +160,9 @@ Type:
 
 `omnimagnet_interfaces/msg/ErrorMessage`
 
-Used for:
+Reports errors that prevent proper driver operation and whether a shutdown has been initiated.
+
+Specifically errors:
 
 - Hardware initialization failures
 - Magnet shutdown failures
@@ -174,15 +212,18 @@ Type:
 | Field | Type | Description |
 |------|------|-------------|
 | omnimagnet | uint64 | Magnet ID |
-| dipole_vec | Vector3 | Desired dipole direction |
-| dipole_strength | float64 | Field strength |
-| duration | float64 | Optional runtime (seconds) |
+| dipole_vec | Vector3 | Desired dipole unit vector |
+| dipole_strength | float64 | Field strength (Am^2)|
+| duration | float64 | (Optional) Runtime (sec) |
 
-## Notes
+## Response
 
-If duration ≤ 0:
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of cause of error |
 
-Default:
+Default duration:
 
 ```cpp
 30 seconds
@@ -216,24 +257,20 @@ Type:
 
 ## Request
 
-| Field | Type |
-|------|------|
-| omnimagnet | uint64 |
-| rotation_vector | Vector3 |
-| dipole_strength | float64 |
-| rotation_freq | float64 |
-| phase_offset | float64 |
-| duration | float64 |
+| Field | Type | Description |
+|------|------|--------------|
+| omnimagnet | uint64 | Magnet ID |
+| rotation_vector | Vector3 | Rotation unit vector |
+| dipole_strength | float64 | Dipole strength (Am^2) |
+| rotation_freq | float64 | Rotation Frequency (Hz) |
+| phase_offset | float64 | Initial Rotation Phase Shift (deg) |
+| duration | float64 | (Optional) Runtime (sec) |
 
-### Notes
-
-Phase offset is specified in:
-
-```text
-degrees
-```
-
-Internally converted to radians.
+## Response
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of cause of error |
 
 ### Example
 
@@ -265,13 +302,30 @@ Type:
 
 ## Request
 
-Supports:
+| Field | Type | Description |
+|------|------|--------------|
+| omnimagnets | uint64[] | List of Magnet IDs |
+| dipole_vecs | Vector3[] | Index-associated dipole unit vectors |
+| dipole_strengths | float64[] | Index-associated dipole strengths (Am^2) |
+| duration | float64 | (Optional) Runtime (sec) |
 
-- One vector for all magnets
+## Response
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of cause of error |
+
+### Supports
+
+- One dipole vector for all magnets
 - One strength for all magnets
 - Per-magnet vectors/strengths
 
-### Example
+### Notes
+- `dipole_vecs` must be either length 1 or the same length as `omnimagnets`
+- `dipole_strengths` must be either length 1 or the same length as `omnimagnets`
+
+### Examples
 
 ```bash
 ros2 service call /multi_magnet_constant omnimagnet_interfaces/srv/MultiMagnetConstant "
@@ -282,6 +336,20 @@ ros2 service call /multi_magnet_constant omnimagnet_interfaces/srv/MultiMagnetCo
   ],
   dipole_strengths: [40.0],
   duration: 10.0
+}"
+```
+
+```bash
+ros2 service call /multi_magnet_constant omnimagnet_interfaces/srv/MultiMagnetConstant "
+{
+  omnimagnets: [0,1,2],
+  dipole_vecs: [
+    {x: 1.0, y: 0.0, z: 0.0},
+    {x: 0.3, y: 0.4, z: 0.5},
+    {x: 0.5, y: 0.0, z: 0.5}
+  ],
+  dipole_strengths: [40.0, 15.0, 25.0],
+  duration: 45.0
 }"
 ```
 
@@ -299,12 +367,46 @@ Type:
 
 `MultiMagnetRotation`
 
-Supports:
+## Request
 
+| Field | Type | Description |
+|------|------|--------------|
+| omnimagnets | uint64[] | List of Magnet IDs |
+| rotation_vectors | Vector3[] | Index-associated rotation unit vectors |
+| rotation_freqs | float64[] | Index-associated rotation frequencies (Hz)
+| dipole_strengths | float64[] | Index-associated dipole strengths (Am^2) |
+| phase_offsets | float64[] | Index-associated rotation offset (deg) |
+| duration | float64 | (Optional) Runtime (sec) |
+
+## Response
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of cause of error |
+
+
+### Supports:
+
+- Synchronous rotation
 - Shared rotation vector
 - Shared frequency
 - Shared phase offset
+- Shared strength
 - Per-magnet overrides
+- Negative frequencies
+
+### Notes
+-`rotation_vectors`, `rotation_freqs`, `dipole_strengths`, and `phase_offsets` must be either length 1 or the same length as `omnimagnets`
+
+### Phase Calculation
+- Initial dipole vector is calculated by crossing the `x` vector with the rotation unit vector `omega`
+ - If `x` and `omega` are nearly parallel, the `y` vector is used instead
+- Phase shift represents movement in the direction of rotation from this initial vector by `phase_offset` degrees
+- If rotation is in the same direction, use identical rotation vectors with same-signed frequencies
+- For opposed rotation:
+ - Use identical rotation vectors with opposite-signed frequencies (Both vectors will have the same 0-phase angle)
+ - Use opposed rotation vectors with same-signed frequencies (Vectors will have opposite 0-phase angle)
+  - Identical to using identical rotation vectors with opposite-signed frequencies and a phase-shift of 180 degrees
 
 ### Example
 
@@ -336,12 +438,23 @@ Type:
 
 `DriverReset`
 
+## Request
+
+None
+
+## Response
+| Field | Type | Description |
+|------|------|-------------|
+| status | bool | True if driver successfully reset |
+
 Immediately:
 
 - Stops active experiment
 - Turns off all magnets
 - Cancels duration timer
 - Restarts timeout timer
+
+Operations cannot be run simultaneously; if a new operation is desired before the previous run finishes, `/reset_driver` must be invoked first.
 
 ### Example
 
@@ -357,13 +470,15 @@ Currently configured:
 
 | ID | Description |
 |----|-------------|
-| 0 | Left Upper |
-| 1 | Center Upper |
-| 2 | Right Upper |
-| 3 | Right Lower |
-| 4 | Left Lower |
+| 1 | Left Upper |
+| 2 | Center Upper |
+| 3 | Right Upper |
+| 4 | Right Lower |
+| 5 | Left Lower |
 
-ID 5 is reserved but disabled.
+(Upper corresponds to north)
+
+ID 6 is reserved but disabled.
 
 ---
 
@@ -403,13 +518,14 @@ On shutdown:
 If no controller command is received for:
 
 ```text
-30 seconds
+60 seconds
 ```
 
 The driver:
 
 1. Publishes error
-2. Safely shuts down
+2. Safely shuts down magnets
+3. Terminates operation
 
 ---
 
