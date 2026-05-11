@@ -241,7 +241,7 @@ Type:
 Default duration:
 
 ```cpp
-30 seconds
+30.0 seconds
 ```
 
 ### Example
@@ -287,6 +287,12 @@ Type:
 | error | bool | If an error prevented service execution |
 | error_desc | string | Brief description of cause of error |
 
+Default duration:
+
+```cpp
+30.0 seconds
+```
+
 ### Example
 
 ```bash
@@ -329,6 +335,12 @@ Type:
 |------|------|-------------|
 | error | bool | If an error prevented service execution |
 | error_desc | string | Brief description of cause of error |
+
+Default duration:
+
+```cpp
+30.0 seconds
+```
 
 ### Supports
 
@@ -399,6 +411,11 @@ Type:
 | error | bool | If an error prevented service execution |
 | error_desc | string | Brief description of cause of error |
 
+Default duration:
+
+```cpp
+30.0 seconds
+```
 
 ### Supports:
 
