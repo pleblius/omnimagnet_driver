@@ -1,8 +1,8 @@
 uint64[] omnimagnets #Config numbers for desired magnets
 Vector3[] rotation_vectors #Index-associated omega vectors
-float64 rotation_freq
+float64[] rotation_freqs #Index-associated frequency values (Hz)
 float64[] dipole_strengths #Index-associated dipole strengths
-float64[] phase_offsets #Index-associated rotation offset in radians
+float64[] phase_offsets #Index-associated rotation offset in degrees
 float64 duration #Optional
 ---
 bool error #true if an error prevented driver from implementing desired control

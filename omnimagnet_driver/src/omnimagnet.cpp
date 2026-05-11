@@ -61,10 +61,13 @@ void OmniMagnet::UpdateMapping() /* Generates the mapping (3X3) matrix*/
 	if (estimate_) {
 		// Generates mapping of dipole (Am^2) to current density (A/m^2)
 		// Equation (13) from Omnimagnet Paper
-		float mapping_constant = 51.45 * 2 * 0.825; 	// Tuned value to map current to desired dipole strength 
+		// float mapping_constant = 51.45 * 2 * 0.825; 	// Tuned value to map current to desired dipole strength 
+		
+		constexpr float mapping_constant = .05145 * 2 * .825 * .115 * .115 * .115 * .115;
 
+		// mapping_ = Eigen::MatrixXd::Identity(3,3)*((mapping_constant * pow (10.0, -3.0) * pow(0.115,4)));
+		mapping_ = Eigen::MatrixXd::Identity(3,3) * mapping_constant;
 
-		mapping_ = Eigen::MatrixXd::Identity(3,3)*((mapping_constant * pow (10.0, -3.0) * pow(0.115,4)));
 		// mapping_ = Eigen::MatrixXd::Identity(3,3)*((51.45 * pow (10.0, -3.0) * (0.115))/(wire_width*wire_width));
 
 		axis_rot_Z = (Eigen::AngleAxisd(orientation_*M_PI/180.0, Eigen::Vector3d::UnitZ()));

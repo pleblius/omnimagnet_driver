@@ -66,7 +66,7 @@ void OmnimagnetDriverNode::setupHardware() {
         msg.shutdown = true;
         errorPublisher->publish(msg);
 
-        std::exit(1);
+        rclcpp::shutdown();
     }
 
     // Setting amplifier inhibitors at 75%. Pins are 25&26
@@ -112,12 +112,12 @@ void OmnimagnetDriverNode::setupHardware() {
  */
 void OmnimagnetDriverNode::setupMagnets() {
     // TODO: Replace this with parameterization and configuration loading
-    omnimagnets[0].SetProp(1.35/1000.0 , 121, 122, 132, 17, 2, 0, 18, true, D2A);     // Omni #1, left upper 
-    omnimagnets[1].SetProp(1.35/1000.0 , 121, 122, 132, 17, 3, 11, 19, true, D2A);    // Omni #2, center upper 
-    omnimagnets[2].SetProp(1.35/1000.0 , 121, 122, 132, 17, 4, 12, 20, true, D2A);    // Omni #3, right upper 
-    omnimagnets[3].SetProp(1.35/1000.0 , 121, 122, 132, 17, 5, 13, 21, true, D2A);     // Omni #4, right lower 
-    omnimagnets[4].SetProp(1.35/1000.0 , 121, 122, 132, 17, 6, 14, 22, true, D2A);   // Omni #5, left lower
-    // omnimagnets[5].SetProp(1.35/1000.0 , 121, 122, 132, 17, 7, 15, 23, true, D2A); omnimagnets[5].UpdateMapping();  // spare (potentially for Super Omni), DON'T TURN ON TILL CONNECTED
+    omnimagnets[1].SetProp(1.35/1000.0, 121, 122, 132, 17, 2, 0,  18, true, D2A);    // Omni #1, left upper 
+    omnimagnets[2].SetProp(1.35/1000.0, 121, 122, 132, 17, 3, 11, 19, true, D2A);    // Omni #2, center upper 
+    omnimagnets[3].SetProp(1.35/1000.0, 121, 122, 132, 17, 4, 12, 20, true, D2A);    // Omni #3, right upper 
+    omnimagnets[4].SetProp(1.35/1000.0, 121, 122, 132, 17, 5, 13, 21, true, D2A);    // Omni #4, right lower 
+    omnimagnets[5].SetProp(1.35/1000.0, 121, 122, 132, 17, 6, 14, 22, true, D2A);    // Omni #5, left lower
+    // omnimagnets[6].SetProp(1.35/1000.0 , 121, 122, 132, 17, 7, 15, 23, true, D2A); omnimagnets[5].UpdateMapping();  // spare (potentially for Super Omni), DON'T TURN ON TILL CONNECTED
 
     for (auto & [id, magnet] : omnimagnets) {
         magnet.UpdateMapping();
@@ -370,8 +370,8 @@ void OmnimagnetDriverNode::smrCallback(
     auto strength = request->dipole_strength;
     auto rotationVector = request->rotation_vector;
     auto offset = request->phase_offset;
+    auto phaseOffset = offset * M_PI / 180.0;
     auto freq = request->rotation_freq;
-    auto duration = request->duration;
 
     if (omnimagnets.count(id) == 0) {
         RCLCPP_WARN(this->get_logger(), "Omnimagnet %lu not found: ", id);
@@ -381,6 +381,12 @@ void OmnimagnetDriverNode::smrCallback(
 
         timeoutTimer->reset();
         return;
+    }
+
+    // Optional argument
+    auto duration = request->duration;
+    if (duration <= 0.0) {
+        duration = 30.0;
     }
 
     auto omni = &omnimagnets[id];
@@ -408,7 +414,7 @@ void OmnimagnetDriverNode::smrCallback(
     rotVec.normalize();
     {
         std::lock_guard<std::mutex> lock (commandMutex);
-        activeCommands[0] = {omni, freq, strength, offset, makeBasis(rotVec), rotVec};
+        activeCommands[0] = {omni, freq, strength, phaseOffset, makeBasis(rotVec), rotVec};
     }
 
     startTime = std::chrono::steady_clock::now();
@@ -435,8 +441,9 @@ void OmnimagnetDriverNode::smrCallback(
         "Magnet: %lu\n"
         "Dipole: <%.3f, %.3f, %.3f>\n"
         "Strength: %.2f\n"
-        "Frequency: %.2f",
-        id, rotationVector.x, rotationVector.y, rotationVector.z, strength, freq
+        "Frequency: %.2f\n"
+        "Offset: %.2f\n",
+        id, rotationVector.x, rotationVector.y, rotationVector.z, strength, freq, offset
     );
 }
 
@@ -482,7 +489,7 @@ void OmnimagnetDriverNode::mmcCallback(
         return;
     }
     if (strengths.size() != 1 && strengths.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Request size mismatch.");
+        RCLCPP_WARN(this->get_logger(), "Strength size mismatch.");
 
         response->error = true;
         response->error_desc = "Dipole strengths list size mismatch.";
@@ -490,9 +497,8 @@ void OmnimagnetDriverNode::mmcCallback(
         timeoutTimer->reset();
         return;
     }
-
     if (vectors.size() != 1 && vectors.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Request size mismatch.");
+        RCLCPP_WARN(this->get_logger(), "Vector size mismatch.");
 
         response->error = true;
         response->error_desc = "Dipole vectors list size mismatch.";
@@ -584,7 +590,7 @@ void OmnimagnetDriverNode::mmcCallback(
         }
     }
 
-    RCLCPP_INFO(this->get_logger(), logString.str().c_str());
+    RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
 
     startTime = std::chrono::steady_clock::now();
     activeCommandCount.store(ids.size(), std::memory_order_release);
@@ -618,7 +624,7 @@ void OmnimagnetDriverNode::mmrCallback(
 
     auto ids = request->omnimagnets;
     auto rotationVectors = request->rotation_vectors;
-    auto freq = request->rotation_freq;
+    auto freqs = request->rotation_freqs;
     auto strengths = request->dipole_strengths;
     auto offsets = request->phase_offsets;
 
@@ -642,7 +648,7 @@ void OmnimagnetDriverNode::mmrCallback(
         return;
     }
     if (strengths.size() != 1 && strengths.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Request size mismatch.");
+        RCLCPP_WARN(this->get_logger(), "Strength size mismatch.");
 
         response->error = true;
         response->error_desc = "Dipole strengths list size mismatch.";
@@ -650,23 +656,30 @@ void OmnimagnetDriverNode::mmrCallback(
         timeoutTimer->reset();
         return;
     }
-
-    if (rotationVectors.size() != 1 && rotationVectors.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Request size mismatch.");
+    if (freqs.size() != 1 && freqs.size() != ids.size()) {
+        RCLCPP_WARN(this->get_logger(), "Frequency size mismatch.");
 
         response->error = true;
-        response->error_desc = "Rotation vectors list size mismatch.";
+        response->error_desc = "Frequency list size mismatch.";
 
         timeoutTimer->reset();
         return;
     }
-
     if (offsets.size() != 1 && offsets.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Request size mismatch.");
+        RCLCPP_WARN(this->get_logger(), "Offset size mismatch.");
 
         response->error = true;
-        response->error_desc = "Phase offsets list size mismatch.";
-        
+        response->error_desc = "Offset list size mismatch.";
+
+        timeoutTimer->reset();
+        return;
+    }
+    if (rotationVectors.size() != 1 && rotationVectors.size() != ids.size()) {
+        RCLCPP_WARN(this->get_logger(), "Rotation vectors size mismatch.");
+
+        response->error = true;
+        response->error_desc = "Rotation vectors list size mismatch.";
+
         timeoutTimer->reset();
         return;
     }
@@ -683,7 +696,7 @@ void OmnimagnetDriverNode::mmrCallback(
         }
     }
 
-    // Optional argument
+    // Optional duration argument
     auto duration = request->duration;
     if (duration <= 0.0) {
         duration = 30.0;
@@ -704,6 +717,7 @@ void OmnimagnetDriverNode::mmrCallback(
         omnimagnet_interfaces::msg::Vector3 rotationVector;
         double strength;
         double offset;
+        double freq;
 
         id = ids[i];
 
@@ -716,11 +730,19 @@ void OmnimagnetDriverNode::mmrCallback(
             strength = strengths[0];
         else
             strength = strengths[i];
+            
+        if (freqs.size() == 1)
+            freq = freqs[0];
+        else
+            freq = freqs[i];
 
         if (offsets.size() == 1)
             offset = offsets[0];
         else
             offset = offsets[i];
+
+        // Convert to radians
+        auto phaseOffset = offset * M_PI / 180.0;
 
         auto omni = &omnimagnets[id];
         
@@ -748,8 +770,9 @@ void OmnimagnetDriverNode::mmrCallback(
         
         {
             std::lock_guard<std::mutex> lock (commandMutex);
-            activeCommands[i] = {omni, freq, strength, offset, makeBasis(rotVec), rotVec};
+            activeCommands[i] = {omni, freq, strength, phaseOffset, makeBasis(rotVec), rotVec};
         }
+
         logString
             << "Magnet: " << id << std::endl
             << "Dipole: <"
@@ -757,7 +780,8 @@ void OmnimagnetDriverNode::mmrCallback(
                 << rotationVector.y << ", "
                 << rotationVector.z << ">" << std::endl
             << "Strength: " << strength << std::endl
-            << "Frequency: " << freq << std::endl;
+            << "Frequency: " << freq << std::endl
+            << "Offset: " << offset << std::endl;
     }
 
     RCLCPP_INFO(this->get_logger(), logString.str().c_str());
@@ -808,6 +832,7 @@ void OmnimagnetDriverNode::resetCallback(
 }
 
 /****************** THREAD LOOP ************************/
+
 void OmnimagnetDriverNode::controlLoop() {
     using clock = std::chrono::steady_clock;
 
@@ -855,6 +880,7 @@ void OmnimagnetDriverNode::controlLoop() {
 
 
 /***************** HELPERS **********************/
+
 Basis OmnimagnetDriverNode::makeBasis(const Eigen::Vector3d& axis) {
     Eigen::Vector3d n = axis.normalized();
 
@@ -870,6 +896,7 @@ Basis OmnimagnetDriverNode::makeBasis(const Eigen::Vector3d& axis) {
 }
 
 /***************** ROS Builders *****************/
+
 void OmnimagnetDriverNode::buildTimers() {
     this->timeoutTimer = this->create_wall_timer(
         std::chrono::duration<double>(30.),
