@@ -452,6 +452,7 @@ Magnet calibration values are currently hardcoded.
 Future improvement:
 
 Move calibration to YAML config.
+Add magnet frame transformations.
 
 ---
 
@@ -471,6 +472,7 @@ Do not bypass these protections when modifying control logic.
 Current code still has several planned improvements:
 
 - [ ] Move magnet config to YAML
+- [ ] Add individual magnet frame transformations
 - [ ] Parameterize timeout values
 - [ ] Parameterize control loop frequency
 - [ ] Add launch file
