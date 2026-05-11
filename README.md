@@ -74,6 +74,23 @@ These are initialized to **75% output** during startup.
 |     4      |     5     |     13     |     21    |
 |     5      |     6     |     14     |     22    |
 
+
+### Magnet IDs
+
+Currently configured:
+
+| ID | Description |
+|----|-------------|
+| 1 | Left Upper |
+| 2 | Center Upper |
+| 3 | Right Upper |
+| 4 | Right Lower |
+| 5 | Left Lower |
+
+(Upper corresponds to north)
+
+ID 6 is reserved but disabled.
+
 ---
 
 ## Dependencies
@@ -143,25 +160,6 @@ Defaults to domain ID
 `2`
 
 Will timeout after 60 seconds of not receiving any topics.
-
----
-
-
-# Magnet IDs
-
-Currently configured:
-
-| ID | Description |
-|----|-------------|
-| 1 | Left Upper |
-| 2 | Center Upper |
-| 3 | Right Upper |
-| 4 | Right Lower |
-| 5 | Left Lower |
-
-(Upper corresponds to north)
-
-ID 6 is reserved but disabled.
 
 ---
 
