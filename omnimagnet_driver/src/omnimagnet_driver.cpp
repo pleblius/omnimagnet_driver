@@ -11,10 +11,7 @@
 # include <iomanip>
 
 int main (int argc, char **argv) {
-    rclcpp::InitOptions init_options;
-    init_options.set_domain_id(2);
-
-    rclcpp::init(argc, argv, init_options);
+    rclcpp::init(argc, argv);
 
     auto node = std::make_shared<OmnimagnetDriverNode>();
     
