@@ -547,7 +547,7 @@ On shutdown:
 If no controller command is received for:
 
 ```text
-60 seconds
+300 seconds
 ```
 
 The driver:
