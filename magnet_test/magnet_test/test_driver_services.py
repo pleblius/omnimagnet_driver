@@ -113,13 +113,14 @@ class DriverTester(Node):
         time.sleep(pause)
 
         # 5. Multi magnet constant, shared vector/strength
+
         req = MultiMagnetConstant.Request()
-        req.omnimagnets = [1, 3, 4, 5]
-        req.dipole_vecs = [vec(0.0, 0.0, 1.0)]
+        req.omnimagnets = [1, 2, 3, 4, 5]
+        req.dipole_vecs = [vec(1.0, 0.0, 0.0)]
         req.dipole_strengths = [40.0]
-        req.duration = 30.0
+        req.duration = 120.0
         self.call(self.mmc, req, "Multi magnet constant shared inputs")
-        time.sleep(30.)
+        time.sleep(120.)
 
         # 6. Multi magnet rotation
         req = MultiMagnetRotation.Request()

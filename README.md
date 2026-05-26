@@ -154,12 +154,7 @@ Launch the driver:
 ros2 run omnimagnet_driver omnimagnet_driver
 ```
 
-### Domain ID
-
-Defaults to domain ID 
-`2`
-
-Will timeout after 60 seconds of not receiving any topics.
+Will timeout after 300 seconds of not receiving any topics.
 
 ---
 

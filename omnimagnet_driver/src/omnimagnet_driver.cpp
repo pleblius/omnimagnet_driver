@@ -899,7 +899,7 @@ Basis OmnimagnetDriverNode::makeBasis(const Eigen::Vector3d& axis) {
 
 void OmnimagnetDriverNode::buildTimers() {
     this->timeoutTimer = this->create_wall_timer(
-        std::chrono::duration<double>(60.),
+        std::chrono::duration<double>(300.),
         std::bind(&OmnimagnetDriverNode::timeoutCallback, this)
     );
 
