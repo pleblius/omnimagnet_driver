@@ -39,11 +39,11 @@ omnimagnet_driver:
 
         wire_width: 0.00135
         wire_lengths: 
-          inner: 121
-          mid: 122
-          outer: 132
+          inner: 121.
+          mid: 122.
+          outer: 132.
         
-        core_size: 17
+        core_size: 17.
 
         channels:
           inner: 2
@@ -64,11 +64,11 @@ omnimagnet_driver:
 
         wire_width: 0.00135
         wire_lengths: 
-          inner: 121
-          mid: 122
-          outer: 132
+          inner: 121.
+          mid: 122.
+          outer: 132.
         
-        core_size: 17
+        core_size: 17.
 
         channels:
           inner: 3
@@ -89,11 +89,11 @@ omnimagnet_driver:
 
         wire_width: 0.00135
         wire_lengths: 
-          inner: 121
-          mid: 122
-          outer: 132
+          inner: 121.
+          mid: 122.
+          outer: 132.
         
-        core_size: 17
+        core_size: 17.
 
         channels:
           inner: 4
@@ -114,11 +114,11 @@ omnimagnet_driver:
 
         wire_width: 0.00135
         wire_lengths: 
-          inner: 121
-          mid: 122
-          outer: 132
+          inner: 121.
+          mid: 122.
+          outer: 132.
         
-        core_size: 17
+        core_size: 17.
 
         channels:
           inner: 5
@@ -139,11 +139,11 @@ omnimagnet_driver:
 
         wire_width: 0.00135
         wire_lengths: 
-          inner: 121
-          mid: 122
-          outer: 132
+          inner: 121.
+          mid: 122.
+          outer: 132.
         
-        core_size: 17
+        core_size: 17.
 
         channels:
           inner: 6
@@ -164,11 +164,11 @@ omnimagnet_driver:
 
         wire_width: 0.00135
         wire_lengths: 
-          inner: 121
-          mid: 122
-          outer: 132
+          inner: 121.
+          mid: 122.
+          outer: 132.
         
-        core_size: 17
+        core_size: 17.
 
         channels:
           inner: 7

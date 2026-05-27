@@ -5,7 +5,7 @@
     name="omnimagnet_driver"
     >
 
-    <param from="$(find-pkg-share omnimagnet_driver)/config/omnimagnet_driver.yaml"/>
+    <param from="$(find-pkg-share omnimagnet_bringup)/config/omnimagnet_params.yaml"/>
 
   </node>
 </launch>

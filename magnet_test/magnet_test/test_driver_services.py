@@ -115,7 +115,7 @@ class DriverTester(Node):
         # 5. Multi magnet constant, shared vector/strength
 
         req = MultiMagnetConstant.Request()
-        req.omnimagnets = [1, 2, 3, 4, 5]
+        req.omnimagnets = [1, 3, 4, 5]
         req.dipole_vecs = [vec(1.0, 0.0, 0.0)]
         req.dipole_strengths = [40.0]
         req.duration = 120.0
