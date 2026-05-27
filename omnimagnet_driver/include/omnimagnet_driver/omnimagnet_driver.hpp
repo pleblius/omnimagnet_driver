@@ -24,9 +24,7 @@ omnimagnet_driver.hpp   defines a class which inherits from the Ros2 node class.
 
     Operation is currently single-threaded, with all magnets updated simultaneously with a given time step.
 
-    TODO: Change fixed constants to parameterized files for easy updating
     TODO: Implement callbacks for additional control modes
-    TODO: Account for rotation with defined phase offset between magnets
     TODO: Update omnimagnet.cpp for more error-handling, including current saturation and failure to write
 
 	Includes:

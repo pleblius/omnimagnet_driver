@@ -1,0 +1,11 @@
+<launch>
+  <node
+    pkg="omnimagnet_driver"
+    exec="omnimagnet_driver"
+    name="omnimagnet_driver"
+    >
+
+    <param from="$(find-pkg-share omnimagnet_driver)/config/omnimagnet_driver.yaml"/>
+
+  </node>
+</launch>

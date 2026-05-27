@@ -257,11 +257,11 @@ void OmnimagnetDriverNode::setupMagnets() {
     }
 
     // TODO: Replace this with parameterization and configuration loading
-    omnimagnets[1].SetProp(1.35/1000.0, 121, 122, 132, 17, 2, 0,  18, true, D2A);    // Omni #1, left upper 
-    omnimagnets[2].SetProp(1.35/1000.0, 121, 122, 132, 17, 3, 11, 19, true, D2A);    // Omni #2, center upper 
-    omnimagnets[3].SetProp(1.35/1000.0, 121, 122, 132, 17, 4, 12, 20, true, D2A);    // Omni #3, right upper 
-    omnimagnets[4].SetProp(1.35/1000.0, 121, 122, 132, 17, 5, 13, 21, true, D2A);    // Omni #4, right lower 
-    omnimagnets[5].SetProp(1.35/1000.0, 121, 122, 132, 17, 6, 14, 22, true, D2A);    // Omni #5, left lower
+    // omnimagnets[1].SetProp(1.35/1000.0, 121, 122, 132, 17, 2, 0,  18, true, D2A);    // Omni #1, left upper 
+    // omnimagnets[2].SetProp(1.35/1000.0, 121, 122, 132, 17, 3, 11, 19, true, D2A);    // Omni #2, center upper 
+    // omnimagnets[3].SetProp(1.35/1000.0, 121, 122, 132, 17, 4, 12, 20, true, D2A);    // Omni #3, right upper 
+    // omnimagnets[4].SetProp(1.35/1000.0, 121, 122, 132, 17, 5, 13, 21, true, D2A);    // Omni #4, right lower 
+    // omnimagnets[5].SetProp(1.35/1000.0, 121, 122, 132, 17, 6, 14, 22, true, D2A);    // Omni #5, left lower
 
 
 
