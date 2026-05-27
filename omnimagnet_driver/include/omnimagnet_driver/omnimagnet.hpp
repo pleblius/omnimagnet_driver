@@ -63,25 +63,35 @@ class OmniMagnet {
 		Eigen::Vector3d current_density;
 		Eigen::Vector3d D2A_pin_number;
 		Eigen::Matrix3d mapping_;
+		Eigen::CompleteOrthogonalDecomposition<Eigen::Matrix3d> decomp_;
 		Eigen::Vector3d max_current;
+		Eigen::Matrix3d frame_;
 		std::chrono::high_resolution_clock::time_point ref_time, current_time;
 	public:
 		int ID{0};
+		double max_dipole_mag;
 
 		OmniMagnet();
 		OmniMagnet(double wire_width, double wire_len_in, double wire_len_mid, double wire_len_out, double core_size, int pinin, int pinmid, int pinout,bool estimate, comedi_t * card);
 		void SetProp(double wire_width, double wire_len_in, double wire_len_mid, double wire_len_out, double core_size, int pinin, int pinmid, int pinout,bool estimate, comedi_t *card);
+		
+		void SetFrame(const Eigen::Matrix3d);
+		void SetFrame(const std::vector<double>&);
+		Eigen::Matrix3d GetFrame();
 
 		int SetCurrent(Eigen::Vector3d current_);
-		void SetOrientation( double orientation);
-		void UpdateMapping();
-		double GetOrientation();
-		void setD2AMax(lsampl_t);
 		Eigen::Vector3d GetCurrent();
+
+		void SetOrientation( double orientation);
+		double GetOrientation();
+		
+		void UpdateMapping();
 		Eigen::Matrix3d GetMapping();
-		Eigen::Vector3d Dipole2Current(Eigen::Vector3d dipole_);
+		
+		void setD2AMax(lsampl_t);
 		lsampl_t CurrentD2A(double);
-		double max_dipole_mag;
+		Eigen::Vector3d Dipole2Current(Eigen::Vector3d dipole_);
+		
 		void RotatingDipole(Eigen::Vector3d init_dipole, Eigen::Vector3d axis_rot, double freq, int dur);
 		// [[maybe_unused]] static Eigen::MatrixXd AshkanPseudoinverse(Eigen::MatrixXd, double);
 		// [[maybe_unused]] static Eigen::MatrixXd Pseudoinverse(Eigen::MatrixXd);
@@ -93,7 +103,12 @@ class OmniMagnet {
 			if (value < val_min)
 				return range_min;
 
-			return (value - val_min) * (range_max - range_min) / (val_max - val_min) + range_min;
+			return static_cast<outType>(
+				static_cast<double>(value - val_min) * 
+				static_cast<double>(range_max - range_min) / 
+				static_cast<double>(val_max - val_min) + 
+				range_min
+			);
 		}
 };
 #endif // OMNIMAGNET_H

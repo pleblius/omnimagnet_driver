@@ -61,6 +61,9 @@ private:
     // Operating Parameters
     const static std::size_t maxMagnets{5};
 
+    double defaultDuration_{30.0};
+    double timeout_{60.0};
+
     std::thread controlThread;
     std::atomic<bool> experimentRunning{false};
     std::atomic<bool> controlThreadRunning{false};
@@ -89,18 +92,15 @@ private:
 
     // D2A card
     comedi_t *D2A;
-    int subdev;
-    int chan;
-    int range;
-    int aref;
-    lsampl_t maxdata25{16383};
-    lsampl_t maxdata26{16383};
+    lsampl_t maxdata1{16383};
+    lsampl_t maxdata2{16383};
 
     // Vectors
 
     Eigen::Vector3d offVector;
 
     /******* FUNCTIONS *******/
+    void loadParameters();
     void buildTimers();
     void buildPublishers();
     void buildServices();

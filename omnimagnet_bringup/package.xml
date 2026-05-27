@@ -3,8 +3,8 @@
 <package format="3">
   <name>omnimagnet_bringup</name>
   <version>0.0.0</version>
-  <description>Launch package for omnimagnet_driver</description>
-  <maintainer email="tyler.c.wilcox@utah.edu">Tyler Wilcox</maintainer>
+  <description>TODO: Package description</description>
+  <maintainer email="tywilcox1@gmail.com">tylerwilcox</maintainer>
   <license>TODO: License declaration</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

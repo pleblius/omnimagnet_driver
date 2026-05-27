@@ -1,0 +1,184 @@
+omnimagnet_driver:
+  ros__parameters:
+
+    # =========================
+    # Hardware Configuration
+    # =========================
+    hardware:
+      device: "/dev/comedi0"
+
+      # Possibly Unused
+      subdevice: 0
+      channel: 10
+      range: 0
+
+      analog_reference: 0   # AREF_GROUND
+
+      inhibitor:
+        enabled: true
+        pins: [25, 26]
+        percent: 0.75
+
+    # =========================
+    # Timing Configuration
+    # =========================
+    timing:
+      timeout_seconds: 300.0
+      default_duration_seconds: 30.0
+      control_frequency_hz: 1200.0
+
+    # =========================
+    # Magnet Configuration
+    # =========================
+    magnets:
+
+      magnet_count: 4
+      magnet_1:
+        id: 1
+        enabled: true
+
+        wire_width: 0.00135
+        wire_lengths: 
+          inner: 121
+          mid: 122
+          outer: 132
+        
+        core_size: 17
+
+        channels:
+          inner: 2
+          mid: 0
+          outer: 18
+
+        estimate: true
+
+        frame: [
+          -1.0, 0.0, 0.0,
+          0.0, 0.0, -1.0,
+          0.0, 1.0, 0.0
+        ]
+
+      magnet_2:
+        id: 2
+        enabled: false
+
+        wire_width: 0.00135
+        wire_lengths: 
+          inner: 121
+          mid: 122
+          outer: 132
+        
+        core_size: 17
+
+        channels:
+          inner: 3
+          mid: 11
+          outer: 19
+
+        estimate: true
+
+        frame: [
+          0.0, 0.0, 0.0,
+          0.0, 0.0, 0.0,
+          0.0, 0.0, 0.0
+        ]
+
+      magnet_3:
+        id: 3
+        enabled: true
+
+        wire_width: 0.00135
+        wire_lengths: 
+          inner: 121
+          mid: 122
+          outer: 132
+        
+        core_size: 17
+
+        channels:
+          inner: 4
+          mid: 12
+          outer: 20
+
+        estimate: true
+        
+        frame: [
+          1.0, 0.0, 0.0,
+          0.0, 1.0, 0.0,
+          0.0, 0.0, -1.0
+        ]
+
+      magnet_4:
+        id: 4
+        enabled: true
+
+        wire_width: 0.00135
+        wire_lengths: 
+          inner: 121
+          mid: 122
+          outer: 132
+        
+        core_size: 17
+
+        channels:
+          inner: 5
+          mid: 13
+          outer: 21
+
+        estimate: true
+
+        frame: [
+          0.0, -1.0, 0.0,
+          -1.0, 0.0, 0.0,
+          0.0, 0.0, -1.0
+        ]
+
+      magnet_5:
+        id: 5
+        enabled: true
+
+        wire_width: 0.00135
+        wire_lengths: 
+          inner: 121
+          mid: 122
+          outer: 132
+        
+        core_size: 17
+
+        channels:
+          inner: 6
+          mid: 14
+          outer: 22
+
+        estimate: true
+
+        frame: [
+          -1.0, 0.0, 0.0,
+          0.0, 1.0, 0.0,
+          0.0, 0.0, 1.0
+        ]
+
+      magnet_6:
+        id: 6
+        enabled: false
+
+        wire_width: 0.00135
+        wire_lengths: 
+          inner: 121
+          mid: 122
+          outer: 132
+        
+        core_size: 17
+
+        channels:
+          inner: 7
+          mid: 15
+          outer: 23
+
+        estimate: true
+
+        frame: [
+          0.0, 0.0, 0.0,
+          0.0, 0.0, 0.0,
+          0.0, 0.0, 0.0
+        ]

@@ -33,6 +33,7 @@ OmnimagnetDriverNode::OmnimagnetDriverNode() :
 
     offVector << 0.0, 0.0, 0.0;
 
+    loadParameters();
     buildTimers();
     buildPublishers();
     buildServices();
@@ -50,13 +51,22 @@ OmnimagnetDriverNode::OmnimagnetDriverNode() :
  * 
  */
 void OmnimagnetDriverNode::setupHardware() {
-    // TODO: Convert this into a .yaml file to load config
-    subdev = 0;
-    chan = 10;
-    range = 0;
-    aref = AREF_GROUND;
+    auto subdev = this->get_parameter("hardware.subdevice").as_int();
+    // auto chan   = this->get_parameter("hardware.channel").as_int();
+    // auto range  = this->get_parameter("hardware.range").as_int();
+    auto aref   = this->get_parameter("hardware.analog_reference").as_int();
+    auto device = this->get_parameter("hardware.device").as_string();
+    auto pct    = this->get_parameter("hardware.inhibitor.percent").as_double();
+    
+    auto inhibs = this->get_parameter("hardware.inhibitor.pins").as_integer_array();
+    if (inhibs.size() != 2) {
+        RCLCPP_ERROR(this->get_logger(), "Need to specify two inhibitor pins.");
+        rclcpp::shutdown();
+    }
+    auto inhbp1 = inhibs.at(0); 
+    auto inhbp2 = inhibs.at(1);
 
-    D2A = comedi_open("/dev/comedi0");
+    D2A = comedi_open(device.c_str());
     if(D2A == nullptr) {
         RCLCPP_ERROR(this->get_logger(), "Failed to open D2A:");
         comedi_perror("comedi_open");
@@ -70,31 +80,32 @@ void OmnimagnetDriverNode::setupHardware() {
     }
 
     // Setting amplifier inhibitors at 75%. Pins are 25&26
-    this->maxdata25  = comedi_get_maxdata(D2A, subdev, 25);
-    this->maxdata26  = comedi_get_maxdata(D2A, subdev, 26);
-    lsampl_t inhib25 = maxdata25 * .75;
-    lsampl_t inhib26 = maxdata26 * .75;
+    this->maxdata1  = comedi_get_maxdata(D2A, subdev, inhbp1);
+    this->maxdata2  = comedi_get_maxdata(D2A, subdev, inhbp2);
+    lsampl_t inhib1 = maxdata1 * pct;
+    lsampl_t inhib2 = maxdata2 * pct;
 
-    int r25 = comedi_data_write(D2A, subdev, 25, 0, aref, inhib25);
+    // Inhibitor pin 1
+    int r25 = comedi_data_write(D2A, subdev, inhbp1, 0, aref, inhib1);
     if (r25 < 0) {
-        RCLCPP_ERROR(this->get_logger(), "Failed to inhibit pin 25!");
-        comedi_perror("Pin25");
+        RCLCPP_ERROR(this->get_logger(), "Failed to inhibit pin %ld:", inhbp1);
+        comedi_perror("");
 
         auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-        msg.error_desc = "Failed to set inhibitor on D2A pin 25.\n";
+        msg.error_desc = "Failed to set inhibitor on D2A pin" + std::to_string(inhbp1) + ".\n";
         msg.shutdown = true;
         errorPublisher->publish(msg);
 
         std::exit(1);
     }
 
-    int r26 = comedi_data_write(D2A, subdev, 26, 0, aref, inhib26);
+    int r26 = comedi_data_write(D2A, subdev, inhbp2, 0, aref, inhib2);
     if (r26 < 0) {
-        RCLCPP_ERROR(this->get_logger(), "Failed to inhibit pin 26!");
-        comedi_perror("Pin26");
+        RCLCPP_ERROR(this->get_logger(), "Failed to inhibit pin %ld:", inhbp2);
+        comedi_perror("");
         
         auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-        msg.error_desc = "Failed to set inhibitor on D2A pin 26.\n";
+        msg.error_desc = "Failed to set inhibitor on D2A pin" + std::to_string(inhbp2) + ".\n";
         msg.shutdown = true;
         errorPublisher->publish(msg);
 
@@ -111,18 +122,153 @@ void OmnimagnetDriverNode::setupHardware() {
  * 
  */
 void OmnimagnetDriverNode::setupMagnets() {
+    int id;
+    // Don't know if there's a way to turn this into a loop
+    if (this->get_parameter("magnets.magnet_1.enabled").as_bool()) {
+        id = this->get_parameter("magnets.magnet_1.id").as_int();
+        omnimagnets[id] = OmniMagnet();
+        
+        omnimagnets[id].SetProp(
+            this->get_parameter("magnets.magnet_1.wire_width").as_double(),
+            this->get_parameter("magnets.magnet_1.wire_lengths.inner").as_double(),
+            this->get_parameter("magnets.magnet_1.wire_lengths.mid").as_double(),
+            this->get_parameter("magnets.magnet_1.wire_lengths.outer").as_double(),
+            this->get_parameter("magnets.magnet_1.core_size").as_double(),
+            this->get_parameter("magnets.magnet_1.channels.inner").as_int(),
+            this->get_parameter("magnets.magnet_1.channels.mid").as_int(),
+            this->get_parameter("magnets.magnet_1.channels.outer").as_int(),
+            this->get_parameter("magnets.magnet_1.estimate").as_bool(),
+            D2A
+        );
+
+        omnimagnets[id].SetFrame(
+            this->get_parameter("magnets.magnet_1.frame").as_double_array()
+        );
+    }
+
+    if (this->get_parameter("magnets.magnet_2.enabled").as_bool()) {
+        id = this->get_parameter("magnets.magnet_2.id").as_int();
+        omnimagnets[id] = OmniMagnet();
+        
+        omnimagnets[id].SetProp(
+            this->get_parameter("magnets.magnet_2.wire_width").as_double(),
+            this->get_parameter("magnets.magnet_2.wire_lengths.inner").as_double(),
+            this->get_parameter("magnets.magnet_2.wire_lengths.mid").as_double(),
+            this->get_parameter("magnets.magnet_2.wire_lengths.outer").as_double(),
+            this->get_parameter("magnets.magnet_2.core_size").as_double(),
+            this->get_parameter("magnets.magnet_2.channels.inner").as_int(),
+            this->get_parameter("magnets.magnet_2.channels.mid").as_int(),
+            this->get_parameter("magnets.magnet_2.channels.outer").as_int(),
+            this->get_parameter("magnets.magnet_2.estimate").as_bool(),
+            D2A
+        );
+
+        omnimagnets[id].SetFrame(
+            this->get_parameter("magnets.magnet_2.frame").as_double_array()
+        );
+    }
+
+    if (this->get_parameter("magnets.magnet_3.enabled").as_bool()) {
+        id = this->get_parameter("magnets.magnet_3.id").as_int();
+        omnimagnets[id] = OmniMagnet();
+        
+        omnimagnets[id].SetProp(
+            this->get_parameter("magnets.magnet_3.wire_width").as_double(),
+            this->get_parameter("magnets.magnet_3.wire_lengths.inner").as_double(),
+            this->get_parameter("magnets.magnet_3.wire_lengths.mid").as_double(),
+            this->get_parameter("magnets.magnet_3.wire_lengths.outer").as_double(),
+            this->get_parameter("magnets.magnet_3.core_size").as_double(),
+            this->get_parameter("magnets.magnet_3.channels.inner").as_int(),
+            this->get_parameter("magnets.magnet_3.channels.mid").as_int(),
+            this->get_parameter("magnets.magnet_3.channels.outer").as_int(),
+            this->get_parameter("magnets.magnet_3.estimate").as_bool(),
+            D2A
+        );
+
+        omnimagnets[id].SetFrame(
+            this->get_parameter("magnets.magnet_3.frame").as_double_array()
+        );
+    }
+
+    if (this->get_parameter("magnets.magnet_4.enabled").as_bool()) {
+        id = this->get_parameter("magnets.magnet_4.id").as_int();
+        omnimagnets[id] = OmniMagnet();
+        
+        omnimagnets[id].SetProp(
+            this->get_parameter("magnets.magnet_4.wire_width").as_double(),
+            this->get_parameter("magnets.magnet_4.wire_lengths.inner").as_double(),
+            this->get_parameter("magnets.magnet_4.wire_lengths.mid").as_double(),
+            this->get_parameter("magnets.magnet_4.wire_lengths.outer").as_double(),
+            this->get_parameter("magnets.magnet_4.core_size").as_double(),
+            this->get_parameter("magnets.magnet_4.channels.inner").as_int(),
+            this->get_parameter("magnets.magnet_4.channels.mid").as_int(),
+            this->get_parameter("magnets.magnet_4.channels.outer").as_int(),
+            this->get_parameter("magnets.magnet_4.estimate").as_bool(),
+            D2A
+        );
+
+        omnimagnets[id].SetFrame(
+            this->get_parameter("magnets.magnet_4.frame").as_double_array()
+        );
+    }
+
+    if (this->get_parameter("magnets.magnet_5.enabled").as_bool()) {
+        id = this->get_parameter("magnets.magnet_5.id").as_int();
+        omnimagnets[id] = OmniMagnet();
+        
+        omnimagnets[id].SetProp(
+            this->get_parameter("magnets.magnet_5.wire_width").as_double(),
+            this->get_parameter("magnets.magnet_5.wire_lengths.inner").as_double(),
+            this->get_parameter("magnets.magnet_5.wire_lengths.mid").as_double(),
+            this->get_parameter("magnets.magnet_5.wire_lengths.outer").as_double(),
+            this->get_parameter("magnets.magnet_5.core_size").as_double(),
+            this->get_parameter("magnets.magnet_5.channels.inner").as_int(),
+            this->get_parameter("magnets.magnet_5.channels.mid").as_int(),
+            this->get_parameter("magnets.magnet_5.channels.outer").as_int(),
+            this->get_parameter("magnets.magnet_5.estimate").as_bool(),
+            D2A
+        );
+
+        omnimagnets[id].SetFrame(
+            this->get_parameter("magnets.magnet_5.frame").as_double_array()
+        );
+    }
+
+    if (this->get_parameter("magnets.magnet_6.enabled").as_bool()) {
+        id = this->get_parameter("magnets.magnet_6.id").as_int();
+        omnimagnets[id] = OmniMagnet();
+        
+        omnimagnets[id].SetProp(
+            this->get_parameter("magnets.magnet_6.wire_width").as_double(),
+            this->get_parameter("magnets.magnet_6.wire_lengths.inner").as_double(),
+            this->get_parameter("magnets.magnet_6.wire_lengths.mid").as_double(),
+            this->get_parameter("magnets.magnet_6.wire_lengths.outer").as_double(),
+            this->get_parameter("magnets.magnet_6.core_size").as_double(),
+            this->get_parameter("magnets.magnet_6.channels.inner").as_int(),
+            this->get_parameter("magnets.magnet_6.channels.mid").as_int(),
+            this->get_parameter("magnets.magnet_6.channels.outer").as_int(),
+            this->get_parameter("magnets.magnet_6.estimate").as_bool(),
+            D2A
+        );
+
+        omnimagnets[id].SetFrame(
+            this->get_parameter("magnets.magnet_6.frame").as_double_array()
+        );
+    }
+
     // TODO: Replace this with parameterization and configuration loading
     omnimagnets[1].SetProp(1.35/1000.0, 121, 122, 132, 17, 2, 0,  18, true, D2A);    // Omni #1, left upper 
     omnimagnets[2].SetProp(1.35/1000.0, 121, 122, 132, 17, 3, 11, 19, true, D2A);    // Omni #2, center upper 
     omnimagnets[3].SetProp(1.35/1000.0, 121, 122, 132, 17, 4, 12, 20, true, D2A);    // Omni #3, right upper 
     omnimagnets[4].SetProp(1.35/1000.0, 121, 122, 132, 17, 5, 13, 21, true, D2A);    // Omni #4, right lower 
     omnimagnets[5].SetProp(1.35/1000.0, 121, 122, 132, 17, 6, 14, 22, true, D2A);    // Omni #5, left lower
-    // omnimagnets[6].SetProp(1.35/1000.0 , 121, 122, 132, 17, 7, 15, 23, true, D2A); omnimagnets[5].UpdateMapping();  // spare (potentially for Super Omni), DON'T TURN ON TILL CONNECTED
+
+
 
     for (auto & [id, magnet] : omnimagnets) {
         magnet.UpdateMapping();
 
-        magnet.setD2AMax(this->maxdata25);
+        magnet.setD2AMax(this->maxdata1);
 
         magnet.ID = id;
     }
@@ -178,15 +324,21 @@ void OmnimagnetDriverNode::shutdown() {
         std::cerr << "Failed to shut down all magnets." << std::endl;
     }
 
+    auto inhibs = this->get_parameter("hardware.inhibitor.pins").as_integer_array();
+    auto inhbp1 = inhibs.at(0); 
+    auto inhbp2 = inhibs.at(1);
+    auto subdev = this->get_parameter("hardware.subdevice").as_int();
+    auto ground = this->get_parameter("hardware.analog_reference").as_int();
+
     bool pinFail = false;
-    int retval = comedi_data_write(D2A, subdev, 25, 0, AREF_GROUND, 16383.0*2./4.);
+    int retval = comedi_data_write(D2A, subdev, inhbp1, 0, ground, maxdata1*2./4.);
     if (retval < 0) {
-        std::cerr << "Failed to shut down D2A Pin 25!" << std::endl;
+        std::cerr << "Failed to shut down D2A Pin " << std::to_string(inhbp1) << std::endl;
         pinFail = true;
     }
-    retval = comedi_data_write(D2A, subdev, 26, 0, AREF_GROUND, 16383.0*2./4.);
+    retval = comedi_data_write(D2A, subdev, inhbp2, 0, ground, maxdata2*2./4.);
     if (retval < 0) {
-        std::cerr << "Failed to shut down D2A Pin 26!" << std::endl;
+        std::cerr << "Failed to shut down D2A Pin " << std::to_string(inhbp2) << std::endl;
         pinFail = true;
     }
 
@@ -289,7 +441,7 @@ void OmnimagnetDriverNode::smcCallback(
     // Optional argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        duration = 30.0;
+        duration = defaultDuration_;
     }
 
     OmniMagnet& omni = omnimagnets[id];
@@ -386,7 +538,7 @@ void OmnimagnetDriverNode::smrCallback(
     // Optional argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        duration = 30.0;
+        duration = defaultDuration_;
     }
 
     auto omni = &omnimagnets[id];
@@ -522,8 +674,7 @@ void OmnimagnetDriverNode::mmcCallback(
     // Optional argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        duration = 30.0;
-        // TODO: Parameterize default duration
+        duration = defaultDuration_;
     }
 
     std::stringstream logString;
@@ -699,8 +850,7 @@ void OmnimagnetDriverNode::mmrCallback(
     // Optional duration argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        duration = 30.0;
-        // TODO: Parameterize default duration
+        duration = defaultDuration_;
     }
 
     std::stringstream logString;
@@ -836,9 +986,9 @@ void OmnimagnetDriverNode::resetCallback(
 void OmnimagnetDriverNode::controlLoop() {
     using clock = std::chrono::steady_clock;
 
-    // TODO: Parameterize
-    constexpr double control_hz = 1200.0;
-    const auto period = std::chrono::duration<double>(1. / control_hz);
+    double control_hz = this->get_parameter(
+        "timing.control_frequency_hz").as_double();
+    auto period = std::chrono::duration<double>(1. / control_hz);
 
     auto next = clock::now();
 
@@ -897,14 +1047,19 @@ Basis OmnimagnetDriverNode::makeBasis(const Eigen::Vector3d& axis) {
 
 /***************** ROS Builders *****************/
 
+void OmnimagnetDriverNode::loadParameters() {
+    defaultDuration_ = this->get_parameter("timing.default_duration_seconds").as_double();
+    timeout_ = this->get_parameter("timing.timeout_seconds").as_double();
+}
+
 void OmnimagnetDriverNode::buildTimers() {
     this->timeoutTimer = this->create_wall_timer(
-        std::chrono::duration<double>(300.),
+        std::chrono::duration<double>(timeout_),
         std::bind(&OmnimagnetDriverNode::timeoutCallback, this)
     );
 
     this->durationTimer = this->create_wall_timer(
-        std::chrono::duration<double>(10.0),
+        std::chrono::duration<double>(defaultDuration_),
         std::bind(&OmnimagnetDriverNode::durationCallback, this)
     );
     this->durationTimer->cancel(); // Hold timer until experiment run

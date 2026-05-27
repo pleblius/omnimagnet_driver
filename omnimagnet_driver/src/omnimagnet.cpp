@@ -55,6 +55,23 @@ void OmniMagnet::SetProp(
 	estimate_ = estimate;
 };
 
+void OmniMagnet::SetFrame(const Eigen::Matrix3d frame) {
+	frame_ = frame;
+}
+
+void OmniMagnet::SetFrame(const std::vector<double>& list) {
+	if (list.size() != 9) {
+		std::cerr << "Cannot set omnimagnet frame, requires list of 9 doubles." << std::endl;
+		return;
+	}
+
+	frame_ = Eigen::Map<const Eigen::Matrix3d, Eigen::RowMajor>(list.data());
+}
+
+Eigen::Matrix3d OmniMagnet::GetFrame() {
+	return frame_;
+}
+
 
 void OmniMagnet::UpdateMapping() /* Generates the mapping (3X3) matrix*/ 
 {
@@ -74,6 +91,7 @@ void OmniMagnet::UpdateMapping() /* Generates the mapping (3X3) matrix*/
 		axis_rot_Z.normalize();
 
 		mapping_ = (axis_rot_Z * mapping_);
+		decomp_  = mapping_.completeOrthogonalDecomposition();
 	}
 	else {
 		std::cout<<"No method, use the estimate method";
@@ -145,10 +163,8 @@ Eigen::Vector3d  OmniMagnet::Dipole2Current(Eigen::Vector3d dipole) /*
 For a given dipole (3X1), calculates the needed current (3X1). The mapping matrix needs to get updated the Omni moves*/
 {
 	Eigen::Vector3d result;
-	result = mapping_.completeOrthogonalDecomposition().solve(dipole);	// calculates the needed current density for desired dipole 
+	result = decomp_.solve(frame_.transpose() * dipole);	// calculates the needed current density for desired dipole 
 	result = result*((wire_width*wire_width));							// calculates current needed
-	// std::cout<< "The requested dipole:     \n" << dipole << std::endl<< "The generated dipole:     \n"<<  mapping_ * result<< std::endl;	
-	// std::cout <<"result :     \n"<< result << std::endl;
 	return result;
 };
 
