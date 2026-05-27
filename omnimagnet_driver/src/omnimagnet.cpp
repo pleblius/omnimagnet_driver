@@ -165,6 +165,7 @@ For a given dipole (3X1), calculates the needed current (3X1). The mapping matri
 	Eigen::Vector3d result;
 	result = decomp_.solve(frame_.transpose() * dipole);	// calculates the needed current density for desired dipole 
 	result = result*((wire_width*wire_width));							// calculates current needed
+	std::cout << result << std::endl;
 	return result;
 };
 

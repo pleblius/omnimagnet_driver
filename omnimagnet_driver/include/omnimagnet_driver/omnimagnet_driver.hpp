@@ -98,6 +98,7 @@ private:
     Eigen::Vector3d offVector;
 
     /******* FUNCTIONS *******/
+    void declareParameters();
     void loadParameters();
     void buildTimers();
     void buildPublishers();
