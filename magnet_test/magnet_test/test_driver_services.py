@@ -75,84 +75,29 @@ class DriverTester(Node):
 
     def run_tests(self):
         self.wait_for_services()
-
-        test_duration = 20.0
-        pause = 1.5
-
+        
         # 1. Reset first
         self.reset_driver()
         time.sleep(0.5)
 
-        # 2. Single magnet constant
-        req = SingleMagnetConstant.Request()
-        req.omnimagnet = 5
-        req.dipole_vec = vec(1.0, 0.0, 0.0)
-        req.dipole_strength = 40.0
-        req.duration = 1.5
-        self.call(self.smc, req, "Single magnet constant")
-        time.sleep(pause)
-
-        # 3. Single magnet rotation
-        req = SingleMagnetRotation.Request()
-        req.omnimagnet = 5
-        req.rotation_vector = vec(0.0, 0.0, 1.0)
-        req.rotation_freq = 15.0
-        req.phase_offset = 0.0
-        req.dipole_strength = 40.0
-        req.duration = 1.5
-        self.call(self.smr, req, "Single magnet rotation")
-        time.sleep(pause)
-
-        # 4. Multi magnet constant
-        req = MultiMagnetConstant.Request()
-        req.omnimagnets = [1, 5]
-        req.dipole_vecs = [vec(1.0, 0.0, 0.0), vec(0.0, 1.0, 0.0)]
-        req.dipole_strengths = [40.0, 40.0]
-        req.duration = 1.5
-        self.call(self.mmc, req, "Multi magnet constant")
-        time.sleep(pause)
-
-        # 5. Multi magnet constant, shared vector/strength
-
+        # Multi magnet constant, shared vector/strength
         req = MultiMagnetConstant.Request()
         req.omnimagnets = [1, 3, 4, 5]
         req.dipole_vecs = [vec(1.0, 0.0, 0.0)]
         req.dipole_strengths = [40.0]
-        req.duration = 120.0
-        self.call(self.mmc, req, "Multi magnet constant shared inputs")
-        time.sleep(120.)
+        req.duration = 60.0
+        self.call(self.mmc, req, "X axis")
+        time.sleep(60.0)
 
-        # 6. Multi magnet rotation
-        req = MultiMagnetRotation.Request()
-        req.omnimagnets = [1, 5]
-        req.rotation_vectors = [vec(0.0, 0.0, 1.0), vec(0.0, 1.0, 0.0)]
-        req.rotation_freqs = [15.0]
-        req.phase_offsets = [0.0, 1.5708]
-        req.dipole_strengths = [30.0, 30.0]
-        req.duration = 1.5
-        self.call(self.mmr, req, "Multi magnet rotation")
-        time.sleep(pause)
+        req.dipole_vecs = [vec(0.0, 1.0, 0.0)]
+        self.call(self.mmc, req, "Y axis")
+        time.sleep(60.0)
 
-        # 7. Multi magnet rotation, shared vector/strength/offset
-        req = MultiMagnetRotation.Request()
-        req.omnimagnets = [1, 5]
-        req.rotation_vectors = [vec(0.0, 0.0, 1.0)]
-        req.rotation_freqs = [15.0]
-        req.phase_offsets = [0.0]
-        req.dipole_strengths = [30.0]
-        req.duration = 1.5
-        self.call(self.mmr, req, "Multi magnet rotation shared inputs")
-        time.sleep(pause)
+        req.dipole_vecs = [vec(0.0, 0.0, 1.0)]
+        self.call(self.mmc, req, "Z axis")
+        time.sleep(60.0)
 
-        # 8. Error case: invalid magnet ID
-        req = SingleMagnetConstant.Request()
-        req.omnimagnet = 999
-        req.dipole_vec = vec(1.0, 0.0, 0.0)
-        req.dipole_strength = 40.0
-        req.duration = test_duration
-        self.call(self.smc, req, "Expected failure: Invalid magnet ID")
-
-        # 9. Final reset
+        # Final reset
         self.reset_driver()
         self.get_logger().info("Test sequence complete.")
 
