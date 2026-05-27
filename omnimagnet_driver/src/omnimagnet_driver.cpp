@@ -33,6 +33,7 @@ OmnimagnetDriverNode::OmnimagnetDriverNode() :
 
     offVector << 0.0, 0.0, 0.0;
 
+    declareParameters();
     loadParameters();
     buildTimers();
     buildPublishers();
@@ -126,6 +127,7 @@ void OmnimagnetDriverNode::setupMagnets() {
     // Don't know if there's a way to turn this into a loop
     if (this->get_parameter("magnets.magnet_1.enabled").as_bool()) {
         id = this->get_parameter("magnets.magnet_1.id").as_int();
+        std::cout << id << std::endl;
         omnimagnets[id] = OmniMagnet();
         
         omnimagnets[id].SetProp(
@@ -256,16 +258,8 @@ void OmnimagnetDriverNode::setupMagnets() {
         );
     }
 
-    // TODO: Replace this with parameterization and configuration loading
-    omnimagnets[1].SetProp(1.35/1000.0, 121, 122, 132, 17, 2, 0,  18, true, D2A);    // Omni #1, left upper 
-    omnimagnets[2].SetProp(1.35/1000.0, 121, 122, 132, 17, 3, 11, 19, true, D2A);    // Omni #2, center upper 
-    omnimagnets[3].SetProp(1.35/1000.0, 121, 122, 132, 17, 4, 12, 20, true, D2A);    // Omni #3, right upper 
-    omnimagnets[4].SetProp(1.35/1000.0, 121, 122, 132, 17, 5, 13, 21, true, D2A);    // Omni #4, right lower 
-    omnimagnets[5].SetProp(1.35/1000.0, 121, 122, 132, 17, 6, 14, 22, true, D2A);    // Omni #5, left lower
-
-
-
     for (auto & [id, magnet] : omnimagnets) {
+        std::cout << id << std::endl;
         magnet.UpdateMapping();
 
         magnet.setD2AMax(this->maxdata1);
@@ -1046,6 +1040,133 @@ Basis OmnimagnetDriverNode::makeBasis(const Eigen::Vector3d& axis) {
 }
 
 /***************** ROS Builders *****************/
+void OmnimagnetDriverNode::declareParameters() {
+    // Hardware
+    this->declare_parameter("hardware.device", "/dev/comedi0");
+    this->declare_parameter("hardware.subdevice", 0);
+    this->declare_parameter("hardware.channel", 10);
+    this->declare_parameter("hardware.range", 0);
+    this->declare_parameter("hardware.analog_reference", 0);
+    this->declare_parameter("hardware.inhibitor.enabled", true);
+    this->declare_parameter<std::vector<int>>("hardware.inhibitor.pins", {25, 26});
+    this->declare_parameter("hardware.inhibitor.percent", .75);
+
+    // Timing
+    this->declare_parameter("timing.timeout_seconds", 300.);
+    this->declare_parameter("timing.default_duration_seconds", 30.0);
+    this->declare_parameter("timing.control_frequency_hz", 1200.);
+
+    // Magnets
+    this->declare_parameter("magnets.magnet_count", 0);
+
+    // Magnet 1
+    this->declare_parameter("magnets.magnet_1.id", 1);
+    this->declare_parameter("magnets.magnet_1.enabled", false);
+    this->declare_parameter("magnets.magnet_1.wire_width", .00135);
+    this->declare_parameter("magnets.magnet_1.wire_lengths.inner", 121);
+    this->declare_parameter("magnets.magnet_1.wire_lengths.mid", 122);
+    this->declare_parameter("magnets.magnet_1.wire_lengths.outer", 132);
+    this->declare_parameter("magnets.magnet_1.core_size", 17);
+    this->declare_parameter("magnets.magnet_1.channels.inner", 2);
+    this->declare_parameter("magnets.magnet_1.channels.mid", 0);
+    this->declare_parameter("magnets.magnet_1.channels.outer", 18);
+    this->declare_parameter("magnets.magnet_1.estimate", true);
+    this->declare_parameter<std::vector<double>>("magnets.magnet_1.frame", {
+        1., 0., 0., 
+        0., 1., 0.,
+        0., 0., 1.
+    });
+
+    // Magnet 2
+    this->declare_parameter("magnets.magnet_2.id", 2);
+    this->declare_parameter("magnets.magnet_2.enabled", false);
+    this->declare_parameter("magnets.magnet_2.wire_width", .00135);
+    this->declare_parameter("magnets.magnet_2.wire_lengths.inner", 121);
+    this->declare_parameter("magnets.magnet_2.wire_lengths.mid", 122);
+    this->declare_parameter("magnets.magnet_2.wire_lengths.outer", 132);
+    this->declare_parameter("magnets.magnet_2.core_size", 17);
+    this->declare_parameter("magnets.magnet_2.channels.inner", 3);
+    this->declare_parameter("magnets.magnet_2.channels.mid", 11);
+    this->declare_parameter("magnets.magnet_2.channels.outer", 19);
+    this->declare_parameter("magnets.magnet_2.estimate", true);
+    this->declare_parameter<std::vector<double>>("magnets.magnet_2.frame", {
+        1., 0., 0., 
+        0., 1., 0.,
+        0., 0., 1.
+    });
+
+    // Magnet 3
+    this->declare_parameter("magnets.magnet_3.id", 3);
+    this->declare_parameter("magnets.magnet_3.enabled", false);
+    this->declare_parameter("magnets.magnet_3.wire_width", .00135);
+    this->declare_parameter("magnets.magnet_3.wire_lengths.inner", 121);
+    this->declare_parameter("magnets.magnet_3.wire_lengths.mid", 122);
+    this->declare_parameter("magnets.magnet_3.wire_lengths.outer", 132);
+    this->declare_parameter("magnets.magnet_3.core_size", 17);
+    this->declare_parameter("magnets.magnet_3.channels.inner", 4);
+    this->declare_parameter("magnets.magnet_3.channels.mid", 12);
+    this->declare_parameter("magnets.magnet_3.channels.outer", 20);
+    this->declare_parameter("magnets.magnet_3.estimate", true);
+    this->declare_parameter<std::vector<double>>("magnets.magnet_3.frame", {
+        1., 0., 0., 
+        0., 1., 0.,
+        0., 0., 1.
+    });
+
+    // Magnet 4
+    this->declare_parameter("magnets.magnet_4.id", 4);
+    this->declare_parameter("magnets.magnet_4.enabled", false);
+    this->declare_parameter("magnets.magnet_4.wire_width", .00135);
+    this->declare_parameter("magnets.magnet_4.wire_lengths.inner", 121);
+    this->declare_parameter("magnets.magnet_4.wire_lengths.mid", 122);
+    this->declare_parameter("magnets.magnet_4.wire_lengths.outer", 132);
+    this->declare_parameter("magnets.magnet_4.core_size", 17);
+    this->declare_parameter("magnets.magnet_4.channels.inner", 5);
+    this->declare_parameter("magnets.magnet_4.channels.mid", 13);
+    this->declare_parameter("magnets.magnet_4.channels.outer", 21);
+    this->declare_parameter("magnets.magnet_4.estimate", true);
+    this->declare_parameter<std::vector<double>>("magnets.magnet_4.frame", {
+        1., 0., 0., 
+        0., 1., 0.,
+        0., 0., 1.
+    });
+
+    // Magnet 5
+    this->declare_parameter("magnets.magnet_5.id", 5);
+    this->declare_parameter("magnets.magnet_5.enabled", false);
+    this->declare_parameter("magnets.magnet_5.wire_width", .00135);
+    this->declare_parameter("magnets.magnet_5.wire_lengths.inner", 121);
+    this->declare_parameter("magnets.magnet_5.wire_lengths.mid", 122);
+    this->declare_parameter("magnets.magnet_5.wire_lengths.outer", 132);
+    this->declare_parameter("magnets.magnet_5.core_size", 17);
+    this->declare_parameter("magnets.magnet_5.channels.inner", 6);
+    this->declare_parameter("magnets.magnet_5.channels.mid", 14);
+    this->declare_parameter("magnets.magnet_5.channels.outer", 22);
+    this->declare_parameter("magnets.magnet_5.estimate", true);
+    this->declare_parameter<std::vector<double>>("magnets.magnet_5.frame", {
+        1., 0., 0., 
+        0., 1., 0.,
+        0., 0., 1.
+    });
+
+    // Magnet 6
+    this->declare_parameter("magnets.magnet_6.id", 6);
+    this->declare_parameter("magnets.magnet_6.enabled", false);
+    this->declare_parameter("magnets.magnet_6.wire_width", .00135);
+    this->declare_parameter("magnets.magnet_6.wire_lengths.inner", 121);
+    this->declare_parameter("magnets.magnet_6.wire_lengths.mid", 122);
+    this->declare_parameter("magnets.magnet_6.wire_lengths.outer", 132);
+    this->declare_parameter("magnets.magnet_6.core_size", 17);
+    this->declare_parameter("magnets.magnet_6.channels.inner", 7);
+    this->declare_parameter("magnets.magnet_6.channels.mid", 15);
+    this->declare_parameter("magnets.magnet_6.channels.outer", 23);
+    this->declare_parameter("magnets.magnet_6.estimate", true);
+    this->declare_parameter<std::vector<double>>("magnets.magnet_6.frame", {
+        1., 0., 0., 
+        0., 1., 0.,
+        0., 0., 1.
+    });
+}
 
 void OmnimagnetDriverNode::loadParameters() {
     defaultDuration_ = this->get_parameter("timing.default_duration_seconds").as_double();
