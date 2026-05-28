@@ -16,17 +16,19 @@ OmniMagnet::OmniMagnet(
 	comedi_t *card
 )
 {
+	OmniMagnet();
  	SetProp(wirewidth, wirelenin, wirelenmid, wirelenout, coresize, pinin, pinmid, pinout, estimate, card);
+};
 
+
+OmniMagnet::OmniMagnet(){
 	this->current_ << 	0.0, 0.0 ,0.0;
 
 	this->mapping_ << 	0.0, 0.0 ,0.0,
 						0.0, 0.0 ,0.0,
 						0.0, 0.0 ,0.0;
-};
-
-
-OmniMagnet::OmniMagnet(){
+						
+	frame_ = Eigen::Matrix3d::Identity();
 };
 
 

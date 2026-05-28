@@ -191,11 +191,48 @@ Driver will timeout after 300 seconds of not receiving any requests.
 
 ---
 
+## Parameters
+
+While default values for all parameters are provided in the source code, the defaults are implemented such that the driver will not run. The proper parameter values from the ```omnimagnet_bringup``` package are required to operate the driver. These parameters can be adjusted in ```omnimagnet_bringup/config/omnimagnet_params.yaml```.
+
+### Hardware Configuration
+
+The hardware configuration parameters control the D2A setup within the code and should not be adjusted unless the D2A is reconfigured.
+
+### Timing Configuration
+
+The timing configuration parameters are used to control the operation of the driver. There are three parameters:
+
+* timeout_seconds: How long the driver will wait for a new request before shutting off. (Default value: 300.0)
+* default_duration_seconds: The default time for a given service request if none is provided. (Default value: 30.0)
+* control_frequency_hz: The default update frequency for the control loop to send new current commands to the omnimagnets. (Default value: 1200.0)
+
+### Magnet Configuration
+
+The magnet configuration parameters relate the omnimagnet hardware to the omnimagnet objects, including identification, construction and wiring configuration, and local reference frame. There is one general magnet configuration parameter, ```magnet_count```, which specifies the number of omnimagnets that are connected to the D2A. The rest of the parameters are used for the configuration of the individual magnets; if any given magnet changes, or if a magnet is added or removed, its parameterization must be adjusted accordingly; additionally, the source code will need to be updated to account for the addition or removal of that magnet.
+
+* id: the local identifier used for the given magnet
+* enabled: whether or not the magnet is active and should be loaded by the driver
+* wire_width: the thickness of the wire used in the magnet's construction
+* wire_lengths:
+  * inner: length of wire used for the innermost coil
+  * mid: length of wire used for the middle coil
+  * outer: length of wire used for the outermost coil
+* core_size: the diameter of the magnetic core at the center of the omnimagnet
+* channels:
+  * inner: D2A channel for innermost coil
+  * mid: D2A channel for the middle coil
+  * outer: D2A channel for the outermost coil
+* estimate: whether the dipole-current relationship should be estimated (currently *needs* to be set to true, no other method is provided) 
+* frame: the rotation matrix of the magnet's actual dipole output with respect to its local frame. The local frame is standardized as described in ```frames/default.png```
+
+---
+
 # Interfaces
 
 ## Vector 3
 
-A copy of ROS2's Vector3 interface type to simplify dependencies
+A copy of ros2's Vector3 interface type to simplify dependencies
 
 | Field | Type |
 |------|------|
@@ -533,10 +570,9 @@ Immediately:
 - Cancels duration timer
 - Restarts timeout timer
 
-Operations cannot be run simultaneously; if a new operation is desired before the previous run finishes, `/reset_driver` must be invoked first.
+Operations cannot be run simultaneously; if a new operation is desired before the previous run finishes, `/reset_driver` must be invoked first, either from another ros2 program or from the terminal.
 
-### Example
-
+To manually command a driver reset, you can use the terminal command
 ```bash
 ros2 service call /reset_driver omnimagnet_interfaces/srv/DriverReset "{}"
 ```
@@ -628,8 +664,7 @@ Magnet calibration values are currently hardcoded.
 
 Future improvement:
 
-Move calibration to YAML config.
-Add magnet frame transformations.
+Add tf subscriber for world-frame transformations
 
 ---
 
@@ -653,11 +688,12 @@ Current code still has several planned improvements:
 - [x] Parameterize timeout values
 - [x] Parameterize control loop frequency
 - [x] Add launch file
+- [ ] Add transform subscriber for controller world-frame transformations
 
 ---
 
 # Authors
 
-Tyler Wilcox
-University of Utah
+Tyler Wilcox, 
+University of Utah,
 tyler.c.wilcox@utah.edu
