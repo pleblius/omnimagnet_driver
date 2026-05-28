@@ -144,17 +144,49 @@ omnimagnet_driver/include/omnimagnet_driver/omnimagnet.hpp
 omnimagnet_driver/src/omnimagnet.cpp
 ```
 
+Launch setup is contained in
+```omnimagnet_bringup/```
+with parameters in 
+```omnimagnet_bringup/config/omnimagnet_params.yaml```
+and the launch file in 
+```omnimagnet_bringup/launch/omnimagnet_driver.launch.xml```
+
 ---
+
+## Building
+
+To build the project, make sure the repository in ```~/ros2_ws/src``` is up-to-date. From ```~/ros2_ws```, use the bash command
+```bash
+colcon build
+```
+
+If done correctly, there should be four sub-folders:
+```~/ros2_ws/build
+~/ros2_ws/install
+~/ros2_ws/log
+~/ros2_ws/src
+```
+
+If errors occur due to a previous build, deleting the build folders may be necessary. This can be done from ```~/ros2_ws``` using
+```bash
+rm -rf build install log
+```
+Invoking ```colcon build``` will then re-build all packages from the source directory.
 
 ## Running
 
-Launch the driver:
+Launch the driver using launch file with configuration parameters:
 
+```bash
+ros2 launch omnimagnet_bringup omnimagnet_driver.launch.xml
+```
+
+To run the driver directly:
 ```bash
 ros2 run omnimagnet_driver omnimagnet_driver
 ```
 
-Will timeout after 300 seconds of not receiving any topics.
+Driver will timeout after 300 seconds of not receiving any requests.
 
 ---
 
@@ -179,7 +211,6 @@ Topic:
 ```bash
 /driver_errors
 ```
-
 
 Type:
 
@@ -616,11 +647,11 @@ Do not bypass these protections when modifying control logic.
 
 Current code still has several planned improvements:
 
-- [ ] Move magnet config to YAML
-- [ ] Add individual magnet frame transformations
-- [ ] Parameterize timeout values
-- [ ] Parameterize control loop frequency
-- [ ] Add launch file
+- [x] Move magnet config to YAML
+- [x] Add individual magnet frame transformations
+- [x] Parameterize timeout values
+- [x] Parameterize control loop frequency
+- [x] Add launch file
 
 ---
 
