@@ -161,7 +161,8 @@ colcon build
 ```
 
 If done correctly, there should be four sub-folders:
-```~/ros2_ws/build
+```
+~/ros2_ws/build
 ~/ros2_ws/install
 ~/ros2_ws/log
 ~/ros2_ws/src
