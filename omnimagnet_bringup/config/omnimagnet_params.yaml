@@ -32,7 +32,7 @@ omnimagnet_driver:
     # =========================
     magnets:
 
-      magnet_count: 4
+      magnet_count: 5
       magnet_1:
         id: 1
         enabled: true
@@ -60,7 +60,7 @@ omnimagnet_driver:
 
       magnet_2:
         id: 2
-        enabled: false
+        enabled: true
 
         wire_width: 0.00135
         wire_lengths: 
@@ -78,9 +78,9 @@ omnimagnet_driver:
         estimate: true
 
         frame: [
-          0.0, 0.0, 0.0,
-          0.0, 0.0, 0.0,
-          0.0, 0.0, 0.0
+          0.0, 0.0, -1.0,
+          -1.0, 0.0, 0.0,
+          0.0, -1.0, 0.0
         ]
 
       magnet_3:
