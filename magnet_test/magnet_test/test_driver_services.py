@@ -82,20 +82,20 @@ class DriverTester(Node):
 
         # Multi magnet constant, shared vector/strength
         req = MultiMagnetConstant.Request()
-        req.omnimagnets = [1, 2, 3, 4, 5]
+        req.omnimagnets = [3]
         req.dipole_vecs = [vec(1.0, 0.0, 0.0)]
         req.dipole_strengths = [40.0]
-        req.duration = 60.0
+        req.duration = 20.0
         self.call(self.mmc, req, "X axis")
-        time.sleep(60.0)
+        time.sleep(20.0)
 
         req.dipole_vecs = [vec(0.0, 1.0, 0.0)]
         self.call(self.mmc, req, "Y axis")
-        time.sleep(60.0)
+        time.sleep(20.0)
 
         req.dipole_vecs = [vec(0.0, 0.0, 1.0)]
         self.call(self.mmc, req, "Z axis")
-        time.sleep(60.0)
+        time.sleep(20.0)
 
         # Final reset
         self.reset_driver()
