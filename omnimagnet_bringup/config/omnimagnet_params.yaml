@@ -25,7 +25,7 @@ omnimagnet_driver:
     timing:
       timeout_seconds: 300.0
       default_duration_seconds: 30.0
-      control_frequency_hz: 1200.0
+      control_frequency_hz: 1000.0
 
     # =========================
     # Magnet Configuration

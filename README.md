@@ -205,7 +205,7 @@ The timing configuration parameters are used to control the operation of the dri
 
 * timeout_seconds: How long the driver will wait for a new request before shutting off. (Default value: 300.0)
 * default_duration_seconds: The default time for a given service request if none is provided. (Default value: 30.0)
-* control_frequency_hz: The default update frequency for the control loop to send new current commands to the omnimagnets. (Default value: 1200.0)
+* control_frequency_hz: The default update frequency for the control loop to send new current commands to the omnimagnets. (Default value: 1000.0)
 
 ### Magnet Configuration
 
@@ -584,7 +584,7 @@ ros2 service call /reset_driver omnimagnet_interfaces/srv/DriverReset "{}"
 A dedicated control thread runs at:
 
 ```text
-1200 Hz
+1000 Hz
 ```
 
 The thread:
