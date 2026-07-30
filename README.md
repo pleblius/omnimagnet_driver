@@ -1,6 +1,6 @@
 # Omnimagnet Driver
 
-A ROS 2 hardware driver for controlling multiple electromagnetic coil systems ("Omnimagnets") through an Advantech PCI-1724 DAQ using `comedilib`.
+A ROS 2 hardware driver for controlling multiple electromagnetic coil systems ("Omnimagnets") through an Advantech PCI-1724U D2A using `comedilib`.
 
 This package provides:
 
@@ -42,12 +42,12 @@ This code is built to run using:
 ### OS
 - Ubuntu Jammy 22.04
 
-### DAQ Board
-- **Advantech PCI-1724**
+### D2A Card
+- **Advantech PCI-1724U**
 - Accessed using `comedilib`
 
 ### Device Access
-Expected DAQ device:
+Expected D2A device:
 
 ```bash
 /dev/comedi0
@@ -87,9 +87,9 @@ Currently configured:
 | 4 | Right Lower |
 | 5 | Left Lower |
 
-(Upper corresponds to north)
+(Upper/Lower corresponds to North/South, respectively. Left/Right corresponds to West/East, respectively.)
 
-ID 6 is reserved but disabled.
+ID 6 is reserved but currently disabled.
 
 ---
 
@@ -570,7 +570,7 @@ Immediately:
 - Cancels duration timer
 - Restarts timeout timer
 
-Operations cannot be run simultaneously; if a new operation is desired before the previous run finishes, `/reset_driver` must be invoked first, either from another ros2 program or from the terminal.
+Operations *cannot* be run simultaneously; if a new operation is desired before the previous run finishes, `/reset_driver` must be invoked first, either from another ros2 program or from the terminal.
 
 To manually command a driver reset, you can use the terminal command
 ```bash
@@ -654,17 +654,7 @@ If permission errors occur:
 sudo usermod -aG iocard $USER
 ```
 
-Then log out and back in.
-
----
-
-## Current Configuration
-
-Magnet calibration values are currently hardcoded.
-
-Future improvement:
-
-Add tf subscriber for world-frame transformations
+Then log out and back in to the computer.
 
 ---
 
@@ -689,6 +679,7 @@ Current code still has several planned improvements:
 - [x] Parameterize control loop frequency
 - [x] Add launch file
 - [ ] Add transform subscriber for controller world-frame transformations
+- [ ] Add current-based alternative drive requests
 
 ---
 
