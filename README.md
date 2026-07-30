@@ -173,6 +173,7 @@ If errors occur due to a previous build, deleting the build folders may be neces
 rm -rf build install log
 ```
 Invoking ```colcon build``` will then re-build all packages from the source directory.
+Note: If the source directory in ```ros2_ws/src``` is deleted, it will need to be reacquired before the project can be built.
 
 ## Running
 
