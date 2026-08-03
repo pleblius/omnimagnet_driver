@@ -32,7 +32,6 @@ omnimagnet_driver:
     # =========================
     magnets:
 
-      magnet_count: 5
       magnet_1:
         id: 1
         enabled: true

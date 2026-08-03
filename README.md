@@ -210,7 +210,7 @@ The timing configuration parameters are used to control the operation of the dri
 
 ### Magnet Configuration
 
-The magnet configuration parameters relate the omnimagnet hardware to the omnimagnet objects, including identification, construction and wiring configuration, and local reference frame. There is one general magnet configuration parameter, ```magnet_count```, which specifies the number of omnimagnets that are connected to the D2A. The rest of the parameters are used for the configuration of the individual magnets; if any given magnet changes, or if a magnet is added or removed, its parameterization must be adjusted accordingly; additionally, the source code will need to be updated to account for the addition or removal of that magnet.
+The magnet configuration parameters relate the omnimagnet hardware to the omnimagnet objects, including identification, construction and wiring configuration, and local reference frame. The rest of the parameters are used for the configuration of the individual magnets; if any given magnet changes, or if a magnet is added or removed, its parameterization must be adjusted accordingly. (Additionally, the number of magnets set in ```omnimagnet_driver.hpp``` will need to be updated to the appropriate count.)
 
 * id: the local identifier used for the given magnet
 * enabled: whether or not the magnet is active and should be loaded by the driver

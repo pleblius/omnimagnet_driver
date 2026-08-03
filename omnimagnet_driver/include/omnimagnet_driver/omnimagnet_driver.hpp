@@ -35,7 +35,7 @@ omnimagnet_driver.hpp   defines a class which inherits from the Ros2 node class.
     Inherits:
         rclcpp::Node
 
-Ver 0.1 by Tyler Wilcox, April 2026
+Ver 1.0 by Tyler Wilcox, August 2026
 tyler.c.wilcox@utah.edu		
 *****************************************************/
 struct ActiveMagnetCommand
@@ -48,6 +48,25 @@ struct ActiveMagnetCommand
     Eigen::Vector3d vector;
 };
 
+struct MagnetConfig
+{
+    int id;
+    bool enabled;
+
+    double wire_width;
+    double inner_wire_length;
+    double mid_wire_length;
+    double outer_wire_length;
+    double core_size;
+
+    int64_t inner_channel;
+    int64_t mid_channel;
+    int64_t outer_channel;
+
+    bool estimate;
+    std::vector<double> frame;
+};
+
 class OmnimagnetDriverNode : public rclcpp::Node {
 
 public:
@@ -57,10 +76,10 @@ public:
 
 private:
     // Operating Parameters
-    const static std::size_t maxMagnets{5};
+    const static std::size_t maxMagnets{6};
 
     double defaultDuration_{30.0};
-    double timeout_{60.0};
+    double timeout_{300.0};
 
     std::thread controlThread;
     std::atomic<bool> experimentRunning{false};
@@ -99,7 +118,10 @@ private:
 
     /******* FUNCTIONS *******/
     void declareParameters();
+    void declareMagnetParameters(std::size_t, const std::array<int, 3>&);
+    static std::string magnetNamespace(std::size_t);
     void loadParameters();
+    MagnetConfig loadMagnetConfig(std::size_t) const;
     void buildTimers();
     void buildPublishers();
     void buildServices();
@@ -135,4 +157,11 @@ private:
     void controlLoop();
 
     Basis makeBasis(const Eigen::Vector3d &axis);
+
+    // Parameters
+    const std::vector<double> identityFrame_{
+        1.0, 0.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 1.0
+    };
 };
