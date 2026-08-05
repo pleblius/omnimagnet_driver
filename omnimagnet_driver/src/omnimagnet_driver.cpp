@@ -435,7 +435,8 @@ void OmnimagnetDriverNode::smcCallback(
     // Optional argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        duration = defaultDuration_;
+        RCLCPP_INFO(this->get_logger(), "0 or negative duration passed.");
+        return;
     }
 
     OmniMagnet& omni = omnimagnets[id];
@@ -483,7 +484,7 @@ void OmnimagnetDriverNode::smcCallback(
         "Beginning Operation\n"
         "Single Magnet\n"
         "Mode: Constant Dipole\n"
-        "Duration %.1f s\n",
+        "Duration %.3f s\n",
         duration
     );
 
@@ -532,7 +533,8 @@ void OmnimagnetDriverNode::smrCallback(
     // Optional argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        duration = defaultDuration_;
+        RCLCPP_INFO(this->get_logger(), "0 or negative duration passed.");
+        return;
     }
 
     auto omni = &omnimagnets[id];
@@ -579,7 +581,7 @@ void OmnimagnetDriverNode::smrCallback(
         "Beginning Operation\n"
         "Single Magnet\n"
         "Mode: Rotating Dipole\n"
-        "Duration %.1f s\n",
+        "Duration %.3f s\n",
         duration
     );
 
@@ -668,7 +670,8 @@ void OmnimagnetDriverNode::mmcCallback(
     // Optional argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        duration = defaultDuration_;
+        RCLCPP_INFO(this->get_logger(), "0 or negative duration passed.");
+        return;
     }
 
     std::stringstream logString;
@@ -844,7 +847,8 @@ void OmnimagnetDriverNode::mmrCallback(
     // Optional duration argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        duration = defaultDuration_;
+        RCLCPP_INFO(this->get_logger(), "0 or negative duration passed.");
+        return;
     }
 
     std::stringstream logString;
