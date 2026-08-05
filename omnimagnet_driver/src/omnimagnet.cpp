@@ -2,6 +2,23 @@
 #include "../include/omnimagnet_driver/omnimagnet.hpp"
 #include "comedilib.hpp"
 
+namespace {
+	template <typename inType, typename outType>
+	outType map_range(inType value, inType val_min, inType val_max, outType range_min, outType range_max) {
+		if (value >= val_max)
+			return range_max;
+		if (value <= val_min)
+			return range_min;
+
+		return static_cast<outType>(
+			static_cast<double>(value - val_min) * 
+			static_cast<double>(range_max - range_min) / 
+			static_cast<double>(val_max - val_min) + 
+			range_min
+		);
+	}
+}
+
 // No return type for constructor
 OmniMagnet::OmniMagnet(
 	double wirewidth,
@@ -167,25 +184,7 @@ For a given dipole (3X1), calculates the needed current (3X1). The mapping matri
 	Eigen::Vector3d result;
 	result = decomp_.solve(frame_.transpose() * dipole);	// calculates the needed current density for desired dipole 
 	result = result*((wire_width*wire_width));							// calculates current needed
-	std::cout << result << std::endl;
 	return result;
-};
-
-
-void OmniMagnet::RotatingDipole(Eigen::Vector3d init_dipole, Eigen::Vector3d axis_rot, double freq_, int dur)
-{
-	std::chrono::duration<double> test_duration = std::chrono::milliseconds(dur);
-	current_time = std::chrono::high_resolution_clock::now();
-	ref_time = current_time; 
-	std::cout<<"\nStart_rot!!!!!\n";
-	while ( current_time - ref_time <test_duration){
-		current_time = std::chrono::high_resolution_clock::now();
-		// std::cout<<"------\n";
-		//std::cout<< ((Eigen::AngleAxisd(( 2.0 * M_PI * ((current_time - ref_time).count()/1000000000.0) * freq_), axis_rot)) * init_dipole) <<"\n";
-		SetCurrent(Dipole2Current((Eigen::AngleAxisd(( 2.0 * M_PI * ((current_time - ref_time).count()/1000000000.0) * freq_), axis_rot)) * init_dipole));
-	};
-	std::cout<<"End rot!!!!!\n";
-	// std::cout<<"here";
 };
 
 /**

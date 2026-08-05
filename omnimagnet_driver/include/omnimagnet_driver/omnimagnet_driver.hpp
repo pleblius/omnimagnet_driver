@@ -119,7 +119,6 @@ private:
     /******* FUNCTIONS *******/
     void declareParameters();
     void declareMagnetParameters(std::size_t, const std::array<int, 3>&);
-    static std::string magnetNamespace(std::size_t);
     void loadParameters();
     MagnetConfig loadMagnetConfig(std::size_t) const;
     void buildTimers();

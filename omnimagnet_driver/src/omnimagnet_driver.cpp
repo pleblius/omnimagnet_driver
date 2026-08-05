@@ -10,6 +10,52 @@
 # include <map>
 # include <iomanip>
 
+// Helper functions
+namespace {
+    // Returns a string representing the namespace of a given magnet index
+    std::string magnetNamespace(std::size_t index) {
+        return "magnets.magnet_" + std::to_string(index);
+    }
+
+    // Error handler for input command errors
+    template<typename ResponseType>
+    void commandError(
+        const rclcpp::Logger& logger,
+        const std::string& logMessage,
+        const std::shared_ptr<ResponseType>& response,
+        const std::string& responseMessage,
+        rclcpp::TimerBase::SharedPtr& timeoutTimer
+    ) {
+        RCLCPP_WARN(logger, "%s", logMessage.c_str());
+
+        response->error = true;
+        response->error_desc = responseMessage;
+
+        timeoutTimer->reset();
+    }
+
+    void systemError(
+        const rclcpp::Logger& logger,
+        const std::string& logmessage,
+        const std::string& comediError,
+        const rclcpp::Publisher<omnimagnet_interfaces::msg::ErrorMessage>::SharedPtr& errorPublisher,
+        const std::string& errorDescription,
+        const bool shutdown
+    ) {
+        RCLCPP_ERROR(logger, "%s", logmessage.c_str());
+        comedi_perror(comediError.c_str());
+
+        auto msg = omnimagnet_interfaces::msg::ErrorMessage();
+        msg.error_desc = errorDescription;
+        msg.shutdown = shutdown;
+        errorPublisher->publish(msg);
+
+        if (shutdown) {
+            rclcpp::shutdown();
+        }
+    }
+}
+
 int main (int argc, char **argv) {
     rclcpp::init(argc, argv);
 
@@ -51,11 +97,12 @@ OmnimagnetDriverNode::OmnimagnetDriverNode() :
  */
 void OmnimagnetDriverNode::setupHardware() {
     auto subdev = this->get_parameter("hardware.subdevice").as_int();
-    // auto chan   = this->get_parameter("hardware.channel").as_int();
-    // auto range  = this->get_parameter("hardware.range").as_int();
     auto aref   = this->get_parameter("hardware.analog_reference").as_int();
     auto device = this->get_parameter("hardware.device").as_string();
     auto pct    = this->get_parameter("hardware.inhibitor.percent").as_double();
+    // Currently unused - Parameters were used in previous implementations, unsure of ultimate purpose, potential deletion candidates
+    // auto chan   = this->get_parameter("hardware.channel").as_int();  // Currently unused - unsure of purpose
+    // auto range  = this->get_parameter("hardware.range").as_int();    // Currently unused - comedi_get_maxdata() is used to determine range
     
     auto inhibs = this->get_parameter("hardware.inhibitor.pins").as_integer_array();
     if (inhibs.size() != 2) {
@@ -67,15 +114,14 @@ void OmnimagnetDriverNode::setupHardware() {
 
     D2A = comedi_open(device.c_str());
     if(D2A == nullptr) {
-        RCLCPP_ERROR(this->get_logger(), "Failed to open D2A:");
-        comedi_perror("comedi_open");
-
-        auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-        msg.error_desc = "Failed to open D2A device.\n";
-        msg.shutdown = true;
-        errorPublisher->publish(msg);
-
-        rclcpp::shutdown();
+        systemError(
+            this->get_logger(),
+            "Failed to open D2A:",
+            "comedi_open",
+            errorPublisher,
+            "Failed to open D2A device.\n",
+            true
+        );
     }
 
     // Setting amplifier inhibitors at 75%. Pins are 25&26
@@ -87,28 +133,30 @@ void OmnimagnetDriverNode::setupHardware() {
     // Inhibitor pin 1
     int r25 = comedi_data_write(D2A, subdev, inhbp1, 0, aref, inhib1);
     if (r25 < 0) {
-        RCLCPP_ERROR(this->get_logger(), "Failed to inhibit pin %ld:", inhbp1);
-        comedi_perror("");
+        systemError(
+            this->get_logger(),
+            "Failed to inhibit pin " + std::to_string(inhbp1) + ":",
+            "comedi_data_write",
+            errorPublisher,
+            "Failed to set inhibitor on D2A pin" + std::to_string(inhbp1) + ".\n",
+            true
+        );
 
-        auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-        msg.error_desc = "Failed to set inhibitor on D2A pin" + std::to_string(inhbp1) + ".\n";
-        msg.shutdown = true;
-        errorPublisher->publish(msg);
-
-        std::exit(1);
+        return;
     }
 
     int r26 = comedi_data_write(D2A, subdev, inhbp2, 0, aref, inhib2);
     if (r26 < 0) {
-        RCLCPP_ERROR(this->get_logger(), "Failed to inhibit pin %ld:", inhbp2);
-        comedi_perror("");
-        
-        auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-        msg.error_desc = "Failed to set inhibitor on D2A pin" + std::to_string(inhbp2) + ".\n";
-        msg.shutdown = true;
-        errorPublisher->publish(msg);
+        systemError(
+            this->get_logger(),
+            "Failed to inhibit pin " + std::to_string(inhbp2) + ":",
+            "comedi_data_write",
+            errorPublisher,
+            "Failed to set inhibitor on D2A pin" + std::to_string(inhbp2) + ".\n",
+            true
+        );
 
-        std::exit(1);
+        return;
     }
 
     RCLCPP_INFO(this->get_logger(), "Hardware setup complete.");
@@ -245,16 +293,14 @@ void OmnimagnetDriverNode::shutdown() {
 /*************** TIMER CALLBACKS ***************/
 
 void OmnimagnetDriverNode::timeoutCallback() {
-    RCLCPP_WARN(this->get_logger(), "Connection timed out.");
-
-    auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-
-    msg.error_desc = "Controller timed out waiting for command. Shutting down.";
-    msg.shutdown   = true;
-
-    errorPublisher->publish(msg);
-
-    rclcpp::shutdown();
+    systemError(
+        this->get_logger(),
+        "Connection timed out.",
+        "timeoutCallback",
+        errorPublisher,
+        "Controller timed out waiting for command. Shutting down.",
+        true
+    );
 }
 
 
@@ -268,13 +314,14 @@ void OmnimagnetDriverNode::durationCallback() {
     for (auto& [id, omni] : omnimagnets) {
         int retval = omni.SetCurrent(offVector);
         if (retval <= 0) {
-            auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-            msg.error_desc = "Failed to shut down magnet" + std::to_string(id);
-            msg.shutdown = true;
-
-            errorPublisher->publish(msg);
-
-            rclcpp::shutdown();
+            systemError(
+                this->get_logger(),
+                "Failed to shut down magnet " + std::to_string(id) + ":",
+                "omni.SetCurrent",
+                errorPublisher,
+                "Failed to shut down magnet" + std::to_string(id) + ".\n",
+                true
+            );
         }
     }
 
@@ -305,12 +352,14 @@ void OmnimagnetDriverNode::smcCallback(
     ) 
 {
     if (experimentRunning.load(std::memory_order_acquire)) {
-        RCLCPP_WARN(this->get_logger(), "Server tried to start experiment while already in operation.");
+        commandError(
+            this->get_logger(), 
+            "Server tried to start experiment while already in operation.", 
+            response,
+            "Operation in progress. Please reset before invoking another operation.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Operation in progress. Please reset before invoking another operation.";
-
-        timeoutTimer->reset();
         return;
     }
 
@@ -340,24 +389,30 @@ void OmnimagnetDriverNode::smcCallback(
 
     Eigen::Vector3d dipole_vector;
     dipole_vector << vector.x, vector.y, vector.z;
+
     if (dipole_vector.norm() < 1e-8) {
-        RCLCPP_WARN(this->get_logger(), "User attempted to pass zero vector.");
+        commandError(
+            this->get_logger(), 
+            "User attempted to pass zero vector.", 
+            response,
+            "Zero rotation vector passed.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Zero dipole vector.";
-
-        timeoutTimer->reset();
         return;
     }
     if (!dipole_vector.allFinite()) {
-        RCLCPP_WARN(this->get_logger(), "User attempted to pass NaN.");
+        commandError(
+            this->get_logger(), 
+            "User attempted to pass NaN.", 
+            response,
+            "NaN component.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "NaN component.";
-
-        timeoutTimer->reset();
         return;
     }
+
     dipole_vector.normalize();
 
     {
@@ -437,25 +492,32 @@ void OmnimagnetDriverNode::smrCallback(
     
     Eigen::Vector3d rotVec;
     rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
+
     if (rotVec.norm() < 1e-8) {
-        RCLCPP_WARN(this->get_logger(), "User attempted to pass zero vector.");
+        commandError(
+            this->get_logger(), 
+            "User attempted to pass zero vector.", 
+            response,
+            "Zero rotation vector passed.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Zero rotation vector passed.";
-
-        timeoutTimer->reset();
         return;
     }
     if (!rotVec.allFinite()) {
-        RCLCPP_WARN(this->get_logger(), "User attempted to pass NaN.");
+        commandError(
+            this->get_logger(), 
+            "User attempted to pass NaN.", 
+            response,
+            "NaN component.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "NaN component.";
-
-        timeoutTimer->reset();
         return;
     }
+
     rotVec.normalize();
+
     {
         std::lock_guard<std::mutex> lock (commandMutex);
         activeCommands[0] = {omni, freq, strength, phaseOffset, makeBasis(rotVec), rotVec};
@@ -515,48 +577,55 @@ void OmnimagnetDriverNode::mmcCallback(
 
     // Check for size mismatches
     if (ids.size() < 1) {
-        RCLCPP_WARN(this->get_logger(), "No omnimagnets selected.");
-
-        response->error = true;
-        response->error_desc = "No omnimagnets selected.";
-
-        timeoutTimer->reset();
-        return;
+        commandError(
+            this->get_logger(), 
+            "No omnimagnets selected.", 
+            response,
+            "No omnimagnets selected.",
+            timeoutTimer
+        );
     }
     if (ids.size() > maxMagnets) {
-        RCLCPP_WARN(this->get_logger(), "Too many magnets selected.");
-
-        response->error = true;
-        response->error_desc = "Too many magnets selected.";
-
-        timeoutTimer->reset();
-        return;
+        commandError(
+            this->get_logger(), 
+            "Too many magnets selected.", 
+            response,
+            "Too many magnets selected.",
+            timeoutTimer
+        );
     }
     if (strengths.size() != 1 && strengths.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Strength size mismatch.");
+        commandError(
+            this->get_logger(), 
+            "Strength size mismatch.", 
+            response,
+            "Dipole strengths list size mismatch.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Dipole strengths list size mismatch.";
-
-        timeoutTimer->reset();
         return;
     }
     if (vectors.size() != 1 && vectors.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Vector size mismatch.");
+        commandError(
+            this->get_logger(), 
+            "Vector size mismatch.", 
+            response,
+            "Dipole vectors list size mismatch.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Dipole vectors list size mismatch.";
-
-        timeoutTimer->reset();
         return;
     }
 
     for (auto& id : ids) {
         if (omnimagnets.count(id) == 0) {
-            RCLCPP_WARN(this->get_logger(), "Omnimagnet %lu not found: ", id);
-
-            response->error = true;
-            response->error_desc = "Invalid magnet ID: " + std::to_string(id);
+            commandError(
+                this->get_logger(), 
+                "Omnimagnet not found.", 
+                response,
+                "Invalid magnet ID: " + std::to_string(id),
+                timeoutTimer
+            );
     
             timeoutTimer->reset();
             return;
@@ -599,24 +668,30 @@ void OmnimagnetDriverNode::mmcCallback(
         
         Eigen::Vector3d dipole_vector;
         dipole_vector << vector.x, vector.y, vector.z;
+
         if (dipole_vector.norm() < 1e-8) {
-            RCLCPP_WARN(this->get_logger(), "User attempted to pass zero vector.");
+            commandError(
+                this->get_logger(), 
+                "User attempted to pass zero vector.", 
+                response,
+                "Zero rotation vector passed.",
+                timeoutTimer
+            );
 
-            response->error = true;
-            response->error_desc = "Zero dipole vector.";
-
-            timeoutTimer->reset();
             return;
         }
         if (!dipole_vector.allFinite()) {
-            RCLCPP_WARN(this->get_logger(), "User attempted to pass NaN.");
+            commandError(
+                this->get_logger(), 
+                "User attempted to pass NaN.", 
+                response,
+                "NaN component.",
+                timeoutTimer
+            );
 
-            response->error = true;
-            response->error_desc = "NaN component.";
-
-            timeoutTimer->reset();
             return;
         }
+
         dipole_vector.normalize();
 
         logString 
@@ -673,68 +748,82 @@ void OmnimagnetDriverNode::mmrCallback(
 
     // Check for size mismatches
     if (ids.size() < 1) {
-        RCLCPP_WARN(this->get_logger(), "No omnimagnets selected.");
+        commandError(
+            this->get_logger(), 
+            "No omnimagnets selected.", 
+            response,
+            "No omnimagnets selected.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "No omnimagnets selected.";
-
-        timeoutTimer->reset();
         return;
     }
     if (ids.size() > maxMagnets) {
-        RCLCPP_WARN(this->get_logger(), "Too many magnets selected.");
+        commandError(
+            this->get_logger(), 
+            "Too many magnets selected.", 
+            response,
+            "Too many magnets selected.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Too many magnets selected.";
-
-        timeoutTimer->reset();
         return;
     }
     if (strengths.size() != 1 && strengths.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Strength size mismatch.");
+        commandError(
+            this->get_logger(), 
+            "Strength size mismatch.", 
+            response,
+            "Dipole strengths list size mismatch.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Dipole strengths list size mismatch.";
-
-        timeoutTimer->reset();
         return;
     }
     if (freqs.size() != 1 && freqs.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Frequency size mismatch.");
+        commandError(
+            this->get_logger(), 
+            "Frequency size mismatch.", 
+            response,
+            "Frequency list size mismatch.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Frequency list size mismatch.";
-
-        timeoutTimer->reset();
         return;
     }
     if (offsets.size() != 1 && offsets.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Offset size mismatch.");
+        commandError(
+            this->get_logger(), 
+            "Offset size mismatch.", 
+            response,
+            "Offset list size mismatch.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Offset list size mismatch.";
-
-        timeoutTimer->reset();
         return;
     }
     if (rotationVectors.size() != 1 && rotationVectors.size() != ids.size()) {
-        RCLCPP_WARN(this->get_logger(), "Rotation vectors size mismatch.");
+        commandError(
+            this->get_logger(), 
+            "Rotation vectors size mismatch.", 
+            response,
+            "Rotation vectors list size mismatch.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Rotation vectors list size mismatch.";
-
-        timeoutTimer->reset();
         return;
     }
 
     for (auto& id : ids) {
         if (omnimagnets.count(id) == 0) {
-            RCLCPP_WARN(this->get_logger(), "Omnimagnet %lu not found: ", id);
+            commandError(
+                this->get_logger(), 
+                "Omnimagnet not found.", 
+                response,
+                "Invalid magnet ID: " + std::to_string(id),
+                timeoutTimer
+            );
 
-            response->error = true;
-            response->error_desc = "Invalid magnet ID: " + std::to_string(id);
-    
-            timeoutTimer->reset();
             return;
         }
     }
@@ -790,24 +879,30 @@ void OmnimagnetDriverNode::mmrCallback(
         
         Eigen::Vector3d rotVec;
         rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
+
         if (rotVec.norm() < 1e-8) {
-            RCLCPP_WARN(this->get_logger(), "User attempted to pass zero vector.");
+            commandError(
+                this->get_logger(),
+                "Zero rotation vector.",
+                response,
+                "Zero rotation vector passed.",
+                timeoutTimer
+            );
 
-            response->error = true;
-            response->error_desc = "Zero rotation vector passed.";
-
-            timeoutTimer->reset();
             return;
         }
         if (!rotVec.allFinite()) {
-            RCLCPP_WARN(this->get_logger(), "User attempted to pass NaN.");
+            commandError(
+                this->get_logger(),
+                "Invalid rotation vector.",
+                response,
+                "NaN component in rotation vector.",
+                timeoutTimer
+            );
 
-            response->error = true;
-            response->error_desc = "NaN component.";
-
-            timeoutTimer->reset();
             return;
         }
+
         rotVec.normalize();
         
         {
@@ -1064,10 +1159,6 @@ void OmnimagnetDriverNode::declareMagnetParameters(
         prefix + ".frame",
         identityFrame_
     );
-}
-
-std::string OmnimagnetDriverNode::magnetNamespace(std::size_t index) {
-    return "magnets.magnet_" + std::to_string(index);
 }
 
 void OmnimagnetDriverNode::loadParameters() {

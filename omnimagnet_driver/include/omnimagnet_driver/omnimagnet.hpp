@@ -95,20 +95,5 @@ class OmniMagnet {
 		void RotatingDipole(Eigen::Vector3d init_dipole, Eigen::Vector3d axis_rot, double freq, int dur);
 		// [[maybe_unused]] static Eigen::MatrixXd AshkanPseudoinverse(Eigen::MatrixXd, double);
 		// [[maybe_unused]] static Eigen::MatrixXd Pseudoinverse(Eigen::MatrixXd);
-
-		template <typename inType, typename outType>
-		static outType map_range(inType value, inType val_min, inType val_max, outType range_min, outType range_max) {
-			if (value > val_max)
-				return range_max;
-			if (value < val_min)
-				return range_min;
-
-			return static_cast<outType>(
-				static_cast<double>(value - val_min) * 
-				static_cast<double>(range_max - range_min) / 
-				static_cast<double>(val_max - val_min) + 
-				range_min
-			);
-		}
 };
 #endif // OMNIMAGNET_H
