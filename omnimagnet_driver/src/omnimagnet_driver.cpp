@@ -295,6 +295,7 @@ void OmnimagnetDriverNode::setupMagnets() {
  * 
  * This function is called during the shutdown process of the ROS2 node.
  * It ensures that all magnets are turned off and that the D2A device is properly released.
+ * 
  * It first checks if the shutdown process has already been initiated to prevent multiple shutdown attempts.
  * It then stops the control thread and waits for it to finish.
  * After that, it attempts to turn off all magnets by setting their current to zero.
@@ -304,11 +305,14 @@ void OmnimagnetDriverNode::setupMagnets() {
  * it logs the error messages and advises the user to use the emergency stop if necessary.
  */
 void OmnimagnetDriverNode::shutdown() {
+    // Currently unnecessary, as shutdown is only called from the main thread. Implemented preemptively in case of future changes.
     static std::atomic_bool already_shutdown{false};
 
     if (already_shutdown.exchange(true)) {
         return;
     }
+    already_shutdown.store(true, std::memory_order_release);
+
     std::cout << "Beginning Shutdown" << std::endl;
 
     // Stop the control thread and wait for it to finish.
