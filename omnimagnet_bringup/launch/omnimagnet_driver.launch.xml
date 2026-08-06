@@ -3,6 +3,7 @@
     pkg="omnimagnet_driver"
     exec="omnimagnet_driver"
     name="omnimagnet_driver"
+    output="screen"
     >
 
     <param from="$(find-pkg-share omnimagnet_bringup)/config/omnimagnet_params.yaml"/>

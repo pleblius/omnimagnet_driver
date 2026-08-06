@@ -24,21 +24,9 @@ Update  by Tyler Wilcox April 2026
 	Moved type.hpp functions into omnimagnet.hpp
 *****************************************************/
 
-/* Set of orthonormal vectors representing a rotation plane */
-struct Basis {
-	Eigen::Vector3d u;
-	Eigen::Vector3d v;
-
-	// Takes linearly independent vectors and creates an orthonormal set of bases
-	Basis(const Eigen::Vector3d &u_, const Eigen::Vector3d &v_) {
-		u = u_.normalized();
-
-		v = (v_ - u * u.dot(v_)).normalized();
-	}
-
-	Basis() {}
-};
-
+/**
+ * @brief Software representation of an omnimagnet.
+ */
 class OmniMagnet {
 	private:
 		int subdev = 0;     /* change this to your input subdevice */
@@ -55,6 +43,7 @@ class OmniMagnet {
 		double wire_len_out;
 		double core_size;
 		double orientation_;
+
 		Eigen::Matrix3d axis_rot_Z;
 		Eigen::Vector3d temperature_;
 		Eigen::Vector3d power_;

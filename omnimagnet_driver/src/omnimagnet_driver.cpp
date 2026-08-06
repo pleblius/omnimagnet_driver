@@ -1,14 +1,14 @@
-# include "rclcpp/rclcpp.hpp"
-# include "../include/omnimagnet_driver/omnimagnet.hpp"
-# include "comedilib.hpp"
-# include "../include/omnimagnet_driver/omnimagnet_driver.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "../include/omnimagnet_driver/omnimagnet.hpp"
+#include "comedilib.hpp"
+#include "../include/omnimagnet_driver/omnimagnet_driver.hpp"
 
-# include <atomic>
-# include <chrono>
-# include <thread>
-# include <vector>
-# include <map>
-# include <iomanip>
+#include <atomic>
+#include <chrono>
+#include <thread>
+#include <vector>
+#include <map>
+#include <iomanip>
 
 // Helper functions
 namespace {
@@ -92,6 +92,31 @@ namespace {
         if (shutdown) {
             rclcpp::shutdown();
         }
+    }
+
+    /**
+     * @brief Constructs a Basis struct from a given axis vector.
+     * 
+     * This function takes an axis vector and constructs a 2D plane with basis vectors u and v 
+     * that are orthogonal to the provided axis using Gram-Schmidt orthogonalization. 
+     * 
+     * @param axis The axis vector to construct the basis from.
+     * 
+     * @return A Basis struct containing the orthogonal basis vectors u and v.
+     */
+    Basis makeBasisFromRotationVector(const Eigen::Vector3d& axis) {
+        Eigen::Vector3d n = axis.normalized();
+
+        // Chooses initial vector to cross axis with. Defaults to 'x', but will choose 'y' if it is nearly parallel to 'x'.
+        Eigen::Vector3d initVec =
+            (std::abs(n.x()) < 0.9)
+                ? Eigen::Vector3d::UnitX()
+                : Eigen::Vector3d::UnitY();
+
+        Eigen::Vector3d u = n.cross(initVec).normalized();
+        Eigen::Vector3d v = n.cross(u).normalized();
+
+        return Basis(u, v);
     }
 }
 
@@ -234,32 +259,23 @@ void OmnimagnetDriverNode::setupHardware() {
  * If any magnet configuration is invalid or if there are duplicate magnet IDs, it throws a runtime error.
  * Finally, it logs the completion of magnet setup and the number of enabled magnets.
  * 
- * @throws std::runtime_error if a magnet configuration is invalid or if there are duplicate magnet IDs.
- * 
- * TODO: Consider replacing runtime throw with a more graceful error handling mechanism, such as logging the error and continuing with the next magnet.
+ * @throws ParameterException if a magnet configuration is invalid or if there are duplicate magnet IDs.
  */
 void OmnimagnetDriverNode::setupMagnets() {
     // Max magnets is currently hard-coded as a static constant in omnimagnet_driver.hpp, 
     // to allow for fixed-size command arrays to increase performance. This might be unnecessary. 
-    for (std::size_t i =1; i < maxMagnets; ++i) {
+    for (std::size_t i = 1; i < maxMagnets; ++i) {
         const MagnetConfig config = loadMagnetConfig(i);
 
         if (!config.enabled)
             continue;
-
-        // Frame must be a 3x3 matrix, so it should have exactly 9 values
-        if (config.frame.size() != 9) {
-            throw std::runtime_error(
-                magnetNamespace(i) + ".frame must contain exactly 9 values (3x3 matrix)"
-            );
-        }
 
         auto [iterator, inserted] =
             omnimagnets.try_emplace(config.id);
 
         // Check if the same ID is loaded twice
         if (!inserted) {
-            throw std::runtime_error(
+            throw ParameterException(
                 "Duplicate magnet ID: " + std::to_string(config.id)
             );
         }
@@ -279,7 +295,13 @@ void OmnimagnetDriverNode::setupMagnets() {
             D2A
         );
 
-        magnet.SetFrame(config.frame);
+        try {
+            magnet.SetFrame(config.frame);
+        }
+        catch (const std::invalid_argument& err) {
+            throw ParameterException("Invalid frame for Magnet " + std::to_string(config.id) + ": " + err.what());
+        }
+
         magnet.UpdateMapping();
         magnet.setD2AMax(this->maxdata1);
         magnet.ID = config.id;
@@ -385,19 +407,19 @@ void OmnimagnetDriverNode::shutdown() {
 /** @brief Callback for handling timeout events.
   * 
   * This function is called when a timeout event occurs.
-  * It logs an error message and shuts down the system.
-  * 
-  * TODO: systemError might be too aggressive, consider changing to a warning and a shutdown.
+  * It logs an error message, publishes to the error publisher, and shuts down the system.
   */
 void OmnimagnetDriverNode::timeoutCallback() {
-    systemError(
-        this->get_logger(),
-        "Connection timed out.",
-        "timeoutCallback",
-        errorPublisher,
-        "Controller timed out waiting for command. Shutting down.",
-        true
-    );
+    RCLCPP_WARN(this->get_logger(), "System timed out. Shutting down.");
+    
+    auto msg = omnimagnet_interfaces::msg::ErrorMessage();
+
+    msg.error_desc = "System timed out.";
+    msg.shutdown = true;
+
+    errorPublisher->publish(msg);
+
+    rclcpp::shutdown();
 }
 
 /** @brief Callback for handling end-of-duration events.
@@ -424,7 +446,7 @@ void OmnimagnetDriverNode::durationCallback() {
             systemError(
                 this->get_logger(),
                 "Failed to shut down magnet " + std::to_string(id) + ":",
-                "omni.SetCurrent",
+                "comedi_data_write",
                 errorPublisher,
                 "Failed to shut down magnet" + std::to_string(id) + ".\n",
                 true
@@ -492,20 +514,26 @@ void OmnimagnetDriverNode::smcCallback(
 
     // Check if the specified magnet ID is valid
     if (omnimagnets.count(id) == 0) {
-        // TODO: Replace with commandError to avoid code duplication
-        RCLCPP_WARN(this->get_logger(), "Omnimagnet %lu not found: ", id);
+        commandError(
+            this->get_logger(),
+            "Omnimagnet " + std::to_string(id) + " not found",
+            response,
+            "Invalid magnet ID: " + std::to_string(id),
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Invalid magnet ID.";
-
-        timeoutTimer->reset();
         return;
     }
 
-    // Optional duration argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        RCLCPP_INFO(this->get_logger(), "0 or negative duration passed.");
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer
+        );
         return;
     }
 
@@ -544,7 +572,7 @@ void OmnimagnetDriverNode::smcCallback(
     // Set up the active command for the specified magnet using a lock guard to ensure thread safety
     {
         std::lock_guard<std::mutex> lock(commandMutex);
-        activeCommands[0] = {&omni, 0, strength, 0, makeBasis(dipole_vector), dipole_vector};
+        activeCommands[0] = {&omni, 0, strength, 0, makeBasisFromRotationVector(dipole_vector), dipole_vector};
     }
 
     // Start the experiment and set the active command count to 1
@@ -552,15 +580,7 @@ void OmnimagnetDriverNode::smcCallback(
     activeCommandCount.store(1, std::memory_order_release);
     experimentRunning.store(true, std::memory_order_release);
 
-    // Create a duration timer for the specified duration, canceling any existing duration timer if it exists
-    // (This should not happen, but is a safety check)
-    if (durationTimer) {
-        durationTimer->cancel();
-    }
-    durationTimer = this->create_wall_timer(
-        std::chrono::duration<double>(duration),
-        std::bind(&OmnimagnetDriverNode::durationCallback, this)
-    );
+    resetDurationTimer(duration);
 
     RCLCPP_INFO(this->get_logger(), 
         "Beginning Operation\n"
@@ -594,14 +614,15 @@ void OmnimagnetDriverNode::smrCallback(
     const omnimagnet_interfaces::srv::SingleMagnetRotation::Response::SharedPtr response
 ) {
     // Check if an experiment is already running
-    // TODO: Replace with a commandError to avoid code duplication
     if (experimentRunning.load(std::memory_order_acquire)) {
-        RCLCPP_WARN(this->get_logger(), "Server tried to start experiment while already in operation.");
+        commandError(
+            this->get_logger(),
+            "Server tried to start experiment while another is in progress.",
+            response,
+            "Operation already in progress. Please wait or reset to begin another experiment.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Operation in progress. Please reset before invoking another operation.";
-
-        timeoutTimer->reset();
         return;
     }
 
@@ -617,20 +638,27 @@ void OmnimagnetDriverNode::smrCallback(
 
     // Check if the specified magnet ID is valid
     if (omnimagnets.count(id) == 0) {
-        // TODO: Replace with commandError to avoid code duplication
-        RCLCPP_WARN(this->get_logger(), "Omnimagnet %lu not found: ", id);
+        commandError(
+            this->get_logger(),
+            "Omnimagnet " + std::to_string(id) + " not found.",
+            response,
+            "Invalid magnet ID: " + std::to_string(id),
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Invalid magnet ID: " + std::to_string(id);
-
-        timeoutTimer->reset();
         return;
     }
 
     // Optional argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        RCLCPP_INFO(this->get_logger(), "0 or negative duration passed.");
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer
+        );
         return;
     }
 
@@ -669,24 +697,13 @@ void OmnimagnetDriverNode::smrCallback(
     // Set up the active command for the specified magnet using a lock guard to ensure thread safety
     {
         std::lock_guard<std::mutex> lock (commandMutex);
-        activeCommands[0] = {omni, freq, strength, phaseOffset, makeBasis(rotVec), rotVec};
+        activeCommands[0] = {omni, freq, strength, phaseOffset, makeBasisFromRotationVector(rotVec), rotVec};
     }
 
     // Start the experiment and set the active command count to 1
     startTime = std::chrono::steady_clock::now();
     activeCommandCount.store(1, std::memory_order_release);
     experimentRunning.store(true, std::memory_order_release);
-
-    // Create a duration timer for the specified duration, canceling any existing duration timer if it exists
-    // (This should not happen, but is a safety check)
-    // TODO: Consider moving this to a separate function to avoid code duplication 
-    if (durationTimer) {
-        durationTimer->cancel();
-    }
-    durationTimer = this->create_wall_timer(
-        std::chrono::duration<double>(duration),
-        std::bind(&OmnimagnetDriverNode::durationCallback, this)
-    );
 
     RCLCPP_INFO(this->get_logger(), 
         "Beginning Operation\n"
@@ -724,13 +741,14 @@ void OmnimagnetDriverNode::mmcCallback(
 {
     // Check if an experiment is already running
     if (experimentRunning.load(std::memory_order_acquire)) {
-        // TODO: Replace with a commandError to avoid code duplication
-        RCLCPP_WARN(this->get_logger(), "Server tried to start experiment while already in operation.");
+        commandError(
+            this->get_logger(), 
+            "Server tried to start experiment while already in operation.", 
+            response,
+            "Operation in progress. Please reset before invoking another operation.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Operation in progress. Please reset before invoking another operation.";
-
-        timeoutTimer->reset();
         return;
     }
 
@@ -801,7 +819,13 @@ void OmnimagnetDriverNode::mmcCallback(
     // Optional argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        RCLCPP_INFO(this->get_logger(), "0 or negative duration passed.");
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer
+        );
         return;
     }
 
@@ -875,7 +899,7 @@ void OmnimagnetDriverNode::mmcCallback(
         // Set up the active command for the specified magnet using a lock guard to ensure thread safety
         {
             std::lock_guard<std::mutex> lock(commandMutex);
-            activeCommands[i] = {&omni, 0, strength, 0, makeBasis(dipole_vector), dipole_vector};
+            activeCommands[i] = {&omni, 0, strength, 0, makeBasisFromRotationVector(dipole_vector), dipole_vector};
         }
     }
 
@@ -886,16 +910,7 @@ void OmnimagnetDriverNode::mmcCallback(
     activeCommandCount.store(ids.size(), std::memory_order_release);
     experimentRunning.store(true, std::memory_order_release);
 
-    // Create a duration timer for the specified duration, canceling any existing duration timer if it exists
-    // (This should not happen, but is a safety check)
-    // TODO: Consider moving this to a separate function to avoid code duplication
-    if (durationTimer) {
-        durationTimer->cancel();
-    }
-    durationTimer = this->create_wall_timer(
-        std::chrono::duration<double>(duration),
-        std::bind(&OmnimagnetDriverNode::durationCallback, this)
-    );
+    resetDurationTimer(duration);
 }
 
 /**
@@ -915,13 +930,14 @@ void OmnimagnetDriverNode::mmrCallback(
 ) {
     // Check if an experiment is already running
     if (experimentRunning.load(std::memory_order_acquire)) {
-        // TODO: Replace with a commandError to avoid code duplication
-        RCLCPP_WARN(this->get_logger(), "Server tried to start experiment while already in operation.");
+        commandError(
+            this->get_logger(), 
+            "Server tried to start experiment while already in operation.", 
+            response,
+            "Operation in progress. Please reset before invoking another operation.",
+            timeoutTimer
+        );
 
-        response->error = true;
-        response->error_desc = "Operation in progress. Please reset before invoking another operation.";
-
-        timeoutTimer->reset();
         return;
     }
 
@@ -1019,7 +1035,13 @@ void OmnimagnetDriverNode::mmrCallback(
     // Optional duration argument
     auto duration = request->duration;
     if (duration <= 0.0) {
-        RCLCPP_INFO(this->get_logger(), "0 or negative duration passed.");
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer
+        );
         return;
     }
 
@@ -1100,7 +1122,7 @@ void OmnimagnetDriverNode::mmrCallback(
         // Set up the active command for the specified magnet using a lock guard to ensure thread safety
         {
             std::lock_guard<std::mutex> lock (commandMutex);
-            activeCommands[i] = {omni, freq, strength, phaseOffset, makeBasis(rotVec), rotVec};
+            activeCommands[i] = {omni, freq, strength, phaseOffset, makeBasisFromRotationVector(rotVec), rotVec};
         }
 
         logString
@@ -1121,15 +1143,7 @@ void OmnimagnetDriverNode::mmrCallback(
     activeCommandCount.store(ids.size(), std::memory_order_release);
     experimentRunning.store(true, std::memory_order_release);
 
-    // Create a duration timer for the specified duration, canceling any existing duration timer if it exists
-    // (This should not happen, but is a safety check)
-    if (durationTimer) {
-        durationTimer->cancel();
-    }
-    durationTimer = this->create_wall_timer(
-        std::chrono::duration<double>(duration),
-        std::bind(&OmnimagnetDriverNode::durationCallback, this)
-    );
+    resetDurationTimer(duration);
 }
 
 /**
@@ -1158,15 +1172,14 @@ void OmnimagnetDriverNode::resetCallback(
     // Turn off all magnets and check for failures
     for (auto & [id, magnet] : omnimagnets) {
         if (magnet.SetCurrent(offVector) < 1) {
-            // TODO: use systemError to avoid code duplication
-            auto msg = omnimagnet_interfaces::msg::ErrorMessage();
-            msg.error_desc = "Failed to turn off magnet " + std::to_string(id);
-            msg.shutdown = true;
-            errorPublisher->publish(msg);
-
-            RCLCPP_WARN(this->get_logger(), "Failed to shut down magnet %d.\nShutting down.", id);
-
-            rclcpp::shutdown();
+            systemError(
+                this->get_logger(),
+                "Failed to shut down magnet " + std::to_string(id),
+                "comedi_data_write",
+                errorPublisher,
+                "Failed to turn off magnet " + std::to_string(id),
+                true
+            );
         } 
     }
 
@@ -1233,8 +1246,8 @@ void OmnimagnetDriverNode::controlLoop() {
                     // Calculate the angle theta based on the frequency, elapsed time, and phase offset
                     double theta = 2.0 * M_PI * command.freq * t + command.offset;
                     Eigen::Vector3d dipole = command.strength * 
-                        (std::cos(theta) * command.basis.u +
-                         std::sin(theta) * command.basis.v);
+                        (std::cos(theta) * command.basis.u() +
+                         std::sin(theta) * command.basis.v());
     
                     command.omni->SetCurrent(command.omni->Dipole2Current(dipole));
                 }
@@ -1244,35 +1257,6 @@ void OmnimagnetDriverNode::controlLoop() {
         // Sleep until the next control cycle to maintain the desired control frequency
         std::this_thread::sleep_until(next);
     }
-}
-
-
-/***************** HELPERS **********************/
-
-/**
- * @brief Constructs a Basis struct from a given axis vector.
- * 
- * This function takes an axis vector and constructs a 2D plane with basis vectors u and v 
- * that are orthogonal to the provided axis using gram-schmidt orthogonalization. 
- * The basis vectors are normalized and can be used for rotating dipole commands.
- * 
- * @param axis The axis vector to construct the basis from.
- * @return A Basis struct containing the orthogonal basis vectors u and v.
- * 
- * TODO: Consider moving to anonymous namespace to avoid polluting the global namespace, as this function is only used within this file.
- */
-Basis OmnimagnetDriverNode::makeBasis(const Eigen::Vector3d& axis) {
-    Eigen::Vector3d n = axis.normalized();
-
-    Eigen::Vector3d initVec =
-        (std::abs(n.x()) < 0.9)
-            ? Eigen::Vector3d::UnitX()
-            : Eigen::Vector3d::UnitY();
-
-    Eigen::Vector3d u = n.cross(initVec).normalized();
-    Eigen::Vector3d v = n.cross(u).normalized();
-
-    return Basis(u, v);
 }
 
 /***************** ROS Builders *****************/
@@ -1493,16 +1477,38 @@ MagnetConfig OmnimagnetDriverNode::loadMagnetConfig(std::size_t index) const {
  * The duration timer is initially canceled and will be started when an experiment is run.
  */
 void OmnimagnetDriverNode::buildTimers() {
-    this->timeoutTimer = this->create_wall_timer(
+    timeoutTimer = this->create_wall_timer(
         std::chrono::duration<double>(timeout_),
         std::bind(&OmnimagnetDriverNode::timeoutCallback, this)
     );
 
-    this->durationTimer = this->create_wall_timer(
+    durationTimer = this->create_wall_timer(
         std::chrono::duration<double>(defaultDuration_),
         std::bind(&OmnimagnetDriverNode::durationCallback, this)
     );
-    this->durationTimer->cancel(); // Hold timer until experiment run
+    
+    durationTimer->cancel(); // Hold timer until experiment run
+}
+
+/**
+ * @brief Resets the driver's duration timer
+ * 
+ * Takes the durationTimer pointer and creates a new wall timer for it with the assigned duration, binding it to the appropriate callback.
+ * 
+ * @param duration The duration of the new timer.
+ * 
+ * @note If the duration timer is somehow in progress when this function is invoked, it will cancel and then reset it.
+ * Any operations in progress will not be canceled.
+ */
+void OmnimagnetDriverNode::resetDurationTimer(const double duration) {
+    if (durationTimer) {
+        durationTimer->cancel();
+    }
+
+    durationTimer = this->create_wall_timer(
+        std::chrono::duration<double>(duration),
+        std::bind(&OmnimagnetDriverNode::durationCallback, this)
+    );
 }
 
 /**

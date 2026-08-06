@@ -205,7 +205,6 @@ The hardware configuration parameters control the D2A setup within the code and 
 The timing configuration parameters are used to control the operation of the driver. There are three parameters:
 
 * timeout_seconds: How long the driver will wait for a new request before shutting off. (Default value: 300.0)
-* default_duration_seconds: The default time for a given service request if none is provided. (Default value: 30.0)
 * control_frequency_hz: The default update frequency for the control loop to send new current commands to the omnimagnets. (Default value: 1000.0)
 
 ### Magnet Configuration
@@ -314,7 +313,7 @@ Type:
 | omnimagnet | uint64 | Magnet ID |
 | dipole_vec | Vector3 | Desired dipole unit vector |
 | dipole_strength | float64 | Field strength (Am^2)|
-| duration | float64 | (Optional) Runtime (sec) |
+| duration | float64 | Runtime (sec) |
 
 ## Response
 
@@ -322,12 +321,6 @@ Type:
 |------|------|-------------|
 | error | bool | If an error prevented service execution |
 | error_desc | string | Brief description of cause of error |
-
-Default duration:
-
-```cpp
-30.0 seconds
-```
 
 ### Example
 
@@ -364,19 +357,13 @@ Type:
 | dipole_strength | float64 | Dipole strength (Am^2) |
 | rotation_freq | float64 | Rotation Frequency (Hz) |
 | phase_offset | float64 | Initial Rotation Phase Shift (deg) |
-| duration | float64 | (Optional) Runtime (sec) |
+| duration | float64 | Runtime (sec) |
 
 ## Response
 | Field | Type | Description |
 |------|------|-------------|
 | error | bool | If an error prevented service execution |
 | error_desc | string | Brief description of cause of error |
-
-Default duration:
-
-```cpp
-30.0 seconds
-```
 
 ### Example
 
@@ -413,19 +400,13 @@ Type:
 | omnimagnets | uint64[] | List of Magnet IDs |
 | dipole_vecs | Vector3[] | Index-associated dipole unit vectors |
 | dipole_strengths | float64[] | Index-associated dipole strengths (Am^2) |
-| duration | float64 | (Optional) Runtime (sec) |
+| duration | float64 | Runtime (sec) |
 
 ## Response
 | Field | Type | Description |
 |------|------|-------------|
 | error | bool | If an error prevented service execution |
 | error_desc | string | Brief description of cause of error |
-
-Default duration:
-
-```cpp
-30.0 seconds
-```
 
 ### Supports
 
@@ -488,19 +469,13 @@ Type:
 | rotation_freqs | float64[] | Index-associated rotation frequencies (Hz) |
 | dipole_strengths | float64[] | Index-associated dipole strengths (Am^2) |
 | phase_offsets | float64[] | Index-associated rotation offset (deg) |
-| duration | float64 | (Optional) Runtime (sec) |
+| duration | float64 | Runtime (sec) |
 
 ## Response
 | Field | Type | Description |
 |------|------|-------------|
 | error | bool | If an error prevented service execution |
 | error_desc | string | Brief description of cause of error |
-
-Default duration:
-
-```cpp
-30.0 seconds
-```
 
 ### Supports:
 

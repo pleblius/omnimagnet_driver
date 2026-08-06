@@ -20,12 +20,16 @@ namespace {
 	 * @tparam inType The type of the input value.
 	 * @tparam outType The type of the output value.
 	 * 
-	 * TODO: Consider adding exception handling for cases where val_min == val_max to avoid division by zero.
+	 * @throws std::invalid_argument if the input range has zero width.
 	 * 
 	 * @note Generic types must support arithmetic operations and type casting to double.
 	 */
 	template <typename inType, typename outType>
 	outType map_range(inType value, inType val_min, inType val_max, outType range_min, outType range_max) {
+		if (val_min == val_max) {
+			throw std::invalid_argument("Input range has zero width.");
+		}
+
 		if (value >= val_max)
 			return range_max;
 		if (value <= val_min)
@@ -38,7 +42,63 @@ namespace {
 			range_min
 		);
 	}
+
+	/**
+	 * @brief Checks if a given matrix is a valid rotation matrix.
+	 * 
+	 * This function checks if the provided 3x3 matrix is a valid rotation matrix by verifying that its determinant is close to 1, 
+	 * its transpose is equal to its inverse, and it is orthogonal.
+	 * 
+	 * @param matrix The 3x3 matrix to be checked.
+	 * @param tolerance The tolerance for numerical comparisons (default is 1e-6).
+	 * 
+	 * @return true if the matrix is a valid rotation matrix, false otherwise.
+	 * 
+	 * @throws std::invalid_argument if the tolerance is not positive.
+	 */
+	bool isValidRotationMatrix(const Eigen::Matrix3d& matrix, const double tolerance = 1e-6) {
+		if (tolerance <= 0) {
+			throw std::invalid_argument("Tolerance must be positive.");
+		}
+
+		// Check if the determinant is close to 1
+		double det = matrix.determinant();
+		if (std::abs(det - 1.0) > tolerance) {
+			return false;
+		}
+
+		// Check if the transpose is equal to the inverse
+		Eigen::Matrix3d transpose = matrix.transpose();
+		Eigen::Matrix3d inverse = matrix.inverse();
+		if (!transpose.isApprox(inverse, tolerance)) {
+			return false;
+		}
+
+		// Check orthogonality: R^T*R should be the identity matrix
+		Eigen::Matrix3d identity = Eigen::Matrix3d::Identity();
+		if (!(transpose * matrix).isApprox(identity, tolerance)) {
+			return false;
+		}
+
+		return true;
+	}
 }
+
+/**
+ * @brief Default constructor for the OmniMagnet class.
+ * 
+ * This constructor initializes the OmniMagnet object with default values for its member variables.
+ * It sets the current vector to zero, initializes the mapping matrix to zero, and sets the frame to the identity matrix.
+ */
+OmniMagnet::OmniMagnet(){
+	this->current_ << 	0.0, 0.0 ,0.0;
+
+	this->mapping_ << 	0.0, 0.0 ,0.0,
+						0.0, 0.0 ,0.0,
+						0.0, 0.0 ,0.0;
+						
+	frame_ = Eigen::Matrix3d::Identity();
+};
 
 /**
  * @brief Constructs an OmniMagnet object with specified properties.
@@ -56,6 +116,10 @@ namespace {
  * @param pinout The pin number for the outer wire.
  * @param estimate A boolean flag indicating whether to use estimation for mapping.
  * @param card A pointer to the comedi_t card for hardware communication.
+ * 
+ * TODO: Consider adding validation for the input parameters to ensure they are within acceptable ranges.
+ * TODO: Consider adding error handling for the comedi_t card pointer to ensure it is valid before use.
+ * TODO: Consider rewriting so there aren't so many parameters, as it may be difficult to maintain and understand. Perhaps use a struct or class to encapsulate the properties.
  */
 OmniMagnet::OmniMagnet(
 	double wirewidth,
@@ -70,22 +134,6 @@ OmniMagnet::OmniMagnet(
 	comedi_t *card
 ) : OmniMagnet() {
  	SetProp(wirewidth, wirelenin, wirelenmid, wirelenout, coresize, pinin, pinmid, pinout, estimate, card);
-};
-
-/**
- * @brief Default constructor for the OmniMagnet class.
- * 
- * This constructor initializes the OmniMagnet object with default values for its member variables.
- * It sets the current vector to zero, initializes the mapping matrix to zero, and sets the frame to the identity matrix.
- */
-OmniMagnet::OmniMagnet(){
-	this->current_ << 	0.0, 0.0 ,0.0;
-
-	this->mapping_ << 	0.0, 0.0 ,0.0,
-						0.0, 0.0 ,0.0,
-						0.0, 0.0 ,0.0;
-						
-	frame_ = Eigen::Matrix3d::Identity();
 };
 
 /**
@@ -140,11 +188,15 @@ void OmniMagnet::SetProp(
  * This method sets the frame of reference for the OmniMagnet object using a 3x3 Eigen matrix.
  * The frame is used to transform the magnet's actual X-Y-Z output frame to the idealized frame described in frames/default.png
  * 
- * TODO: Consider adding validation to ensure the input matrix is a valid rotation matrix.
- * 
  * @param frame A 3x3 Eigen matrix representing the frame of reference.
+ * 
+ * @throws std::invalid_argument if the input matrix is not a valid rotation matrix.
  */
 void OmniMagnet::SetFrame(const Eigen::Matrix3d frame) {
+	if (!isValidRotationMatrix(frame)) {
+		throw std::invalid_argument("Input frame is not a valid rotation matrix.");
+	}
+
 	frame_ = frame;
 }
 
@@ -156,27 +208,24 @@ void OmniMagnet::SetFrame(const Eigen::Matrix3d frame) {
  * If the vector does not contain exactly 9 elements, it produces and error and returns without modifying the frame.
  * The frame is used to transform the magnet's actual X-Y-Z output frame to the idealized frame described in frames/default.png
  * 
- * TODO: Consider adding validation to ensure the input vector can be reshaped into a valid rotation matrix.
- * TODO: Consider adding a method to set the frame using a 2D array or other convenient data structure.
- * TODO: Consider adding a method to set the frame using a quaternion or axis-angle representation.
- * TODO: Consider adding a method to set the frame using a rotation vector or Euler angles.
- * TODO: Consider adding a method to set the frame using a transformation matrix that includes translation.
- * TODO: Consider adding a method to set the frame using a homogeneous transformation matrix.
- * TODO: Consider adding a method to set the frame using a dual quaternion representation.
- * TODO: Consider adding a method to set the frame using a screw axis representation.
- * TODO: Add exception handling for invalid input, such as a vector that cannot be reshaped into a 3x3 matrix.
- * 
  * @param list A vector of doubles representing the frame of reference in row-major order.
+ * 
+ * @throws std::invalid_argument if list cannot be converted to 3x3 matrix or if matrix is not a valid rotation matrix.
  * 
  * @note The vector must contain exactly 9 elements to be interpreted as a 3x3 matrix.
  */
 void OmniMagnet::SetFrame(const std::vector<double>& list) {
 	if (list.size() != 9) {
-		std::cerr << "Cannot set omnimagnet frame, requires list of 9 doubles." << std::endl;
-		return;
+		throw std::invalid_argument("List does not have 9 entries.");
 	}
 
-	frame_ = Eigen::Map<const Eigen::Matrix3d, Eigen::RowMajor>(list.data());
+	Eigen::Matrix3d matrix = Eigen::Map<const Eigen::Matrix3d, Eigen::RowMajor>(list.data());
+
+	if (!isValidRotationMatrix(matrix)) {
+		throw std::invalid_argument("Matrix is not a valid rotation matrix.");
+	}
+
+	frame_ = matrix;
 }
 
 /**
@@ -184,14 +233,6 @@ void OmniMagnet::SetFrame(const std::vector<double>& list) {
  * 
  * This method returns the current frame of reference for the OmniMagnet object as a 3x3 Eigen matrix.
  * The frame is used to transform the magnet's actual X-Y-Z output frame to the idealized frame described in frames/default.png
- * 
- * TODO: Consider adding a method to retrieve the frame as a vector of doubles or other convenient data structure.
- * TODO: Consider adding a method to retrieve the frame as a quaternion or axis-angle representation.
- * TODO: Consider adding a method to retrieve the frame as a rotation vector or Euler angles.
- * TODO: Consider adding a method to retrieve the frame as a transformation matrix that includes translation.
- * TODO: Consider adding a method to retrieve the frame as a homogeneous transformation matrix.
- * TODO: Consider adding a method to retrieve the frame as a dual quaternion representation.
- * TODO: Consider adding a method to retrieve the frame as a screw axis representation.
  * 
  * @return A 3x3 Eigen matrix representing the frame of reference.
  */
@@ -207,7 +248,6 @@ Eigen::Matrix3d OmniMagnet::GetFrame() {
  * If the estimation flag is set, it calculates the mapping matrix using a predefined constant and applies the orientation rotation.
  * The mapping matrix is then decomposed using complete orthogonal decomposition for later use in solving for current densities.
  * 
- * TODO: Consider adding validation to ensure the mapping matrix is valid and invertible.
  * TODO: Rewrite to be more intuitive and more dynamic, as the mapping constant is currently hardcoded and may need to be adjusted based on experimental calibration.
  */
 void OmniMagnet::UpdateMapping() /* Generates the mapping (3X3) matrix*/ 
