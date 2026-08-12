@@ -15,7 +15,9 @@ find_package(geometry_msgs REQUIRED)
 
 add_executable(omnimagnet_driver 
   src/omnimagnet_driver.cpp
-  src/omnimagnet.cpp)
+  src/omnimagnet.cpp
+  src/commands.cpp
+)
 ament_target_dependencies(omnimagnet_driver rclcpp example_interfaces geometry_msgs omnimagnet_interfaces)
 target_link_libraries(omnimagnet_driver ${COMEDI_LIB})
 

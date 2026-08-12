@@ -14,17 +14,29 @@ omnimagnet_driver:
 
       analog_reference: 0   # AREF_GROUND
 
+      # Sample range based on 14-bit card
+      min_sample: 0
+      max_sample: 16383
+
+      # Voltage range used for PCI-1724U D-A card
+      min_voltage: -10.0
+      max_voltage: 10.0
+
+
+      # Current range from AMC30A8 current drive
+      min_current: -15.0
+      max_current: 15.0
+
       inhibitor:
         enabled: true
         pins: [25, 26]
-        percent: 0.75
+        voltage: 5.0
 
     # =========================
     # Timing Configuration
     # =========================
     timing:
-      timeout_seconds: 300.0
-      default_duration_seconds: 30.0
+      timeout_seconds: 600.0
       control_frequency_hz: 1000.0
 
     # =========================
