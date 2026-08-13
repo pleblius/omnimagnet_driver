@@ -1,6 +1,6 @@
 uint64[] omnimagnets # ID associated with desired omnimagnets
-Vector3[] dipole_vecs # Index-associated dipole vectors (Can be length 1 to apply to all magnets)
-float64[] dipole_strengths # Index-associated dipole strengths (Am^2) (Can be length 1 to apply to all magnets)
+Vector3[] current_vecs # Index-associated rotation vectors (Can be length 1 to apply to all magnets)
+float64[] current_strengths # Index-associated current strengths (A) (Can be length 1 to apply to all magnets)
 float64 duration # Seconds
 ---
 bool error # true if an error prevented driver from implementing desired control

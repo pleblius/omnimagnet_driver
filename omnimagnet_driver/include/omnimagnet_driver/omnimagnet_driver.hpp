@@ -12,6 +12,11 @@
 #include "omnimagnet_interfaces/srv/multi_magnet_rotation.hpp"
 #include "omnimagnet_interfaces/srv/driver_reset.hpp"
 
+#include "omnimagnet_interfaces/srv/single_current_constant.hpp"
+#include "omnimagnet_interfaces/srv/single_current_rotation.hpp"
+#include "omnimagnet_interfaces/srv/multi_current_constant.hpp"
+#include "omnimagnet_interfaces/srv/multi_current_rotation.hpp"
+
 #include <chrono>
 #include <vector>
 #include <map>
@@ -118,6 +123,12 @@ private:
     void durationCallback();
 
     // Server callbacks
+    void resetCallback(
+        [[maybe_unused]] const omnimagnet_interfaces::srv::DriverReset::Request::SharedPtr,
+        const omnimagnet_interfaces::srv::DriverReset::Response::SharedPtr
+    );
+
+    // Dipole-driven callbacks
     void smcCallback(
         const omnimagnet_interfaces::srv::SingleMagnetConstant::Request::SharedPtr,
         const omnimagnet_interfaces::srv::SingleMagnetConstant::Response::SharedPtr
@@ -134,10 +145,25 @@ private:
         const omnimagnet_interfaces::srv::MultiMagnetRotation::Request::SharedPtr,
         const omnimagnet_interfaces::srv::MultiMagnetRotation::Response::SharedPtr
     );
-    void resetCallback(
-        [[maybe_unused]] const omnimagnet_interfaces::srv::DriverReset::Request::SharedPtr,
-        const omnimagnet_interfaces::srv::DriverReset::Response::SharedPtr
+
+    // Current-driven callbacks
+    void sccCallback(
+        const omnimagnet_interfaces::srv::SingleCurrentConstant::Request::SharedPtr,
+        const omnimagnet_interfaces::srv::SingleCurrentConstant::Response::SharedPtr
     );
+    void scrCallback(
+        const omnimagnet_interfaces::srv::SingleCurrentRotation::Request::SharedPtr,
+        const omnimagnet_interfaces::srv::SingleCurrentRotation::Response::SharedPtr
+    );
+    void mccCallback(
+        const omnimagnet_interfaces::srv::MultiCurrentConstant::Request::SharedPtr,
+        const omnimagnet_interfaces::srv::MultiCurrentConstant::Response::SharedPtr
+    );
+    void mcrCallback(
+        const omnimagnet_interfaces::srv::MultiCurrentRotation::Request::SharedPtr,
+        const omnimagnet_interfaces::srv::MultiCurrentRotation::Response::SharedPtr
+    );
+
 
     void controlLoop();
 };

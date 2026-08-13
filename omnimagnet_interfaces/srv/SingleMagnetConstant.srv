@@ -1,7 +1,7 @@
-uint64 omnimagnet #Number associated with omnimagnet configuration
+uint64 omnimagnet # Number associated with omnimagnet configuration
 Vector3 dipole_vec
-float64 dipole_strength
-float64 duration #Optional
+float64 dipole_strength # Am^2
+float64 duration # Seconds
 ---
-bool error #true if an error prevented driver from implementing desired control
-string error_desc #Description of failure if error is true
+bool error # true if an error prevented driver from implementing desired control
+string error_desc # Description of failure if error is true

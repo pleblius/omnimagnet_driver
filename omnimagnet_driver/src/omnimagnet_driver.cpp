@@ -7,6 +7,7 @@
 #include <atomic>
 #include <thread>
 #include <iomanip>
+#include <any>
 
 // Helper functions
 namespace {
@@ -159,6 +160,108 @@ namespace {
 			range_min
 		);
 	}
+
+    /**
+     * @brief Checks if a vector is valid for driver use. Checks for zero vectors and non-finite components.
+     * 
+     * @param vector The 3x1 vector to check for validity.
+     * @param output An error string if the vector is invalid.
+     * 
+     * @return true if the vector is valid.
+     */
+    bool validVector(const Eigen::Vector3d& vector, std::string& output) {
+        // Check for NaN
+        if (!vector.allFinite()) {
+            output = "User passed non-finite vector.";
+
+            return false;
+        }
+
+        // Check for zero vectors
+        if (vector.isApprox(Eigen::Vector3d::Zero())) {
+            output = "User passed zero vector.";
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Checks if a magnet ID is contained in the magnet map.
+     * 
+     * @param id Magnet id.
+     * @param map Map of IDs to magnet objects.
+     * @param output Contains error string if vector is invalid.
+     * 
+     * @return true if the id is valid.
+     */
+    bool checkID(
+        int id,
+        const std::map<int, OmniMagnet>& map,
+        std::string& output
+    ) {
+        if (map.count(id) == 0) {
+            output = "Magnet ID " + std::to_string(id) + " not found.";
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Checks an vector of magnet IDs for validity.
+     * 
+     * @param ids Vector containing list of magnet IDs.
+     * @param map Mapping of integer ids to magnet objects.
+     * @param output Contains error string if vector is invalid.
+     * 
+     * @return true if ID vector is valid.
+     */
+    bool checkIDs(
+        const std::vector<uint64_t>& ids,
+        const std::map<int, OmniMagnet>& map,
+        std::string& output
+    ) {
+        if (ids.size() < 1) {
+            output = "No magnets selected.";
+
+            return false;
+        }
+
+        // Check if map contains id
+        for (auto& id : ids) {
+            if (!checkID(id, map, output))
+                return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Checks if each vector has a valid number of elements, either exactly 1 element or the same number of elements as the ids vector.
+     * 
+     * @param ids Vector of magnet ids.
+     * @param output Contains error string if check fails.
+     * @param vecs Variadic argument of all vectors to check.
+     * 
+     * @return true if all vectors are a valid size.
+     */
+    template <typename... Vecs>
+    bool checkMultipleVectors(
+        const std::vector<uint64_t>& ids,
+        std::string& output,
+        const Vecs&... vecs
+    ) {
+        bool isValid =
+            ((vecs.size() == 1 || vecs.size() == ids.size()) && ...);
+
+        if (!isValid)
+            output = "Vector size mismatch.";
+
+        return isValid;
+    }
 }
 
 /**
@@ -493,18 +596,21 @@ void OmnimagnetDriverNode::smcCallback(
     auto strength = request->dipole_strength;
     auto vector = request->dipole_vec;
 
+    std::string errorString;
+
     // Check if the specified magnet ID is valid
-    if (omnimagnets_.count(id) == 0) {
+    if (!checkID(id, omnimagnets_, errorString)) {
         commandError(
             this->get_logger(),
-            "Omnimagnet " + std::to_string(id) + " not found",
+            errorString,
             response,
-            "Invalid magnet ID: " + std::to_string(id),
+            errorString,
             timeoutTimer_
         );
 
         return;
     }
+    auto& magnet = omnimagnets_.at(id);
 
     auto duration = request->duration;
     if (duration <= 0.0) {
@@ -518,29 +624,15 @@ void OmnimagnetDriverNode::smcCallback(
         return;
     }
 
-    auto& magnet = omnimagnets_.at(id);
+    Eigen::Vector3d dipoleVector;
+    dipoleVector << vector.x, vector.y, vector.z;
 
-    Eigen::Vector3d dipole_vector;
-    dipole_vector << vector.x, vector.y, vector.z;
-
-    // Check if the dipole vector is valid (non-zero and finite)
-    if (dipole_vector.norm() < 1e-8) {
+    if (!validVector(dipoleVector, errorString)) {
         commandError(
-            this->get_logger(), 
-            "User attempted to pass zero vector.", 
+            this->get_logger(),
+            errorString,
             response,
-            "Zero rotation vector passed.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-    if (!dipole_vector.allFinite()) {
-        commandError(
-            this->get_logger(), 
-            "User attempted to pass NaN.", 
-            response,
-            "NaN component.",
+            errorString,
             timeoutTimer_
         );
 
@@ -548,9 +640,9 @@ void OmnimagnetDriverNode::smcCallback(
     }
 
     // Normalize dipole vector to ensure it has a unit length
-    dipole_vector.normalize();
+    dipoleVector.normalize();
 
-    ConstantDipoleCommand command = {&magnet, strength, dipole_vector};
+    ConstantDipoleCommand command = {&magnet, strength, dipoleVector};
 
     // Set up the active command for the specified magnet using a lock guard to ensure thread safety
     {
@@ -611,23 +703,27 @@ void OmnimagnetDriverNode::smrCallback(
     auto strength = request->dipole_strength;
     auto rotationVector = request->rotation_vector;
     auto offset = request->phase_offset;
-    auto phaseOffset = offset * M_PI / 180.0;
+    auto phaseOffset = offset * M_PI / 180.0; // Converted to radians
     auto freq = request->rotation_freq;
+    auto duration = request->duration;
+    
+    std::string errorString;
 
     // Check if the specified magnet ID is valid
-    if (omnimagnets_.count(id) == 0) {
+    if (checkID(id, omnimagnets_, errorString)) {
         commandError(
             this->get_logger(),
-            "Omnimagnet " + std::to_string(id) + " not found.",
+            errorString,
             response,
-            "Invalid magnet ID: " + std::to_string(id),
+            errorString,
             timeoutTimer_
         );
 
         return;
     }
+    auto& magnet = omnimagnets_.at(id);
 
-    auto duration = request->duration;
+    // Check if duration is positive
     if (duration <= 0.0) {
         commandError(
             this->get_logger(),
@@ -638,40 +734,24 @@ void OmnimagnetDriverNode::smrCallback(
         );
         return;
     }
-
-    auto& magnet = omnimagnets_.at(id);
     
     Eigen::Vector3d rotVec;
     rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
 
-    // Check if the rotation vector is valid (non-zero and finite)
-    if (rotVec.norm() < 1e-8) {
+    if (!validVector(rotVec, errorString)) {
         commandError(
-            this->get_logger(), 
-            "User attempted to pass zero vector.", 
+            this->get_logger(),
+            errorString,
             response,
-            "Zero rotation vector passed.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-    if (!rotVec.allFinite()) {
-        commandError(
-            this->get_logger(), 
-            "User attempted to pass NaN.", 
-            response,
-            "NaN component.",
+            errorString,
             timeoutTimer_
         );
 
         return;
     }
 
-    // Normalize rotation vector to ensure it has a unit length
-    rotVec.normalize();
-
-    RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, makeBasisFromRotationVector(rotVec)};
+    Basis rotationPlane = makeBasisFromRotationVector(rotVec);
+    RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
 
     // Set up the active command for the specified magnet using a lock guard to ensure thread safety
     {
@@ -692,7 +772,7 @@ void OmnimagnetDriverNode::smrCallback(
 
     RCLCPP_INFO(this->get_logger(), 
         "Magnet: %lu\n"
-        "Dipole: <%.3f, %.3f, %.3f>\n"
+        "Rotation: <%.3f, %.3f, %.3f>\n"
         "Strength: %.2f\n"
         "Frequency: %.2f\n"
         "Offset: %.2f\n",
@@ -734,68 +814,38 @@ void OmnimagnetDriverNode::mmcCallback(
     auto strengths = request->dipole_strengths;
     auto vectors = request->dipole_vecs;
 
-    std::vector<ActiveMagnetCommand> commandList;
-
-    // Check for size mismatches
-    if (ids.size() < 1) {
-        commandError(
-            this->get_logger(), 
-            "No omnimagnets selected.", 
-            response,
-            "No omnimagnets selected.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-    if (ids.size() > maxMagnets_) {
-        commandError(
-            this->get_logger(), 
-            "Too many magnets selected.", 
-            response,
-            "Too many magnets selected.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-    if (strengths.size() != 1 && strengths.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Strength size mismatch.", 
-            response,
-            "Dipole strengths list size mismatch.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-    if (vectors.size() != 1 && vectors.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Vector size mismatch.", 
-            response,
-            "Dipole vectors list size mismatch.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-
-    for (auto& id : ids) {
-        if (omnimagnets_.count(id) == 0) {
-            commandError(
-                this->get_logger(), 
-                "Omnimagnet not found.", 
-                response,
-                "Invalid magnet ID: " + std::to_string(id),
-                timeoutTimer_
-            );
     
-            timeoutTimer_->reset();
+    std::vector<ActiveMagnetCommand> commandList;
+    
+    std::string errorString;
+    
+    if (!checkIDs(ids, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+        
+        return;
+    }
+    
+    if (!checkMultipleVectors(
+        ids,
+        errorString,
+        strengths,
+        vectors
+    )) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
 
-            return;
-        }
+        return;
     }
 
     // Optional argument
@@ -829,39 +879,25 @@ void OmnimagnetDriverNode::mmcCallback(
         id = ids[i];
 
         // If only one vector is provided, use it for all magnets; otherwise, use the corresponding vector for each magnet
-        if (vectors.size() == 1)
-            vector = vectors[0];
-        else
-            vector = vectors[i];
+        vector = (vectors.size() == 1)
+            ? vectors[0]
+            : vectors[i];
 
-        if (strengths.size() == 1)
-            strength = strengths[0];
-        else
-            strength = strengths[i];
+        strength = (strengths.size() == 1)
+            ? strengths[0]
+            : strengths[i];
 
         auto& magnet = omnimagnets_.at(id);
         
-        Eigen::Vector3d dipole_vector;
-        dipole_vector << vector.x, vector.y, vector.z;
+        Eigen::Vector3d dipoleVector;
+        dipoleVector << vector.x, vector.y, vector.z;
 
-        // Check if the dipole vector is valid (non-zero and finite)
-        if (dipole_vector.norm() < 1e-8) {
+        if (!validVector(dipoleVector, errorString)) {
             commandError(
-                this->get_logger(), 
-                "User attempted to pass zero vector.", 
+                this->get_logger(),
+                errorString,
                 response,
-                "Zero rotation vector passed.",
-                timeoutTimer_
-            );
-
-            return;
-        }
-        if (!dipole_vector.allFinite()) {
-            commandError(
-                this->get_logger(), 
-                "User attempted to pass NaN.", 
-                response,
-                "NaN component.",
+                errorString,
                 timeoutTimer_
             );
 
@@ -869,7 +905,7 @@ void OmnimagnetDriverNode::mmcCallback(
         }
 
         // Normalize dipole vector to ensure it has a unit length
-        dipole_vector.normalize();
+        dipoleVector.normalize();
 
         logString 
             << "Magnet: " << id << std::endl
@@ -879,7 +915,7 @@ void OmnimagnetDriverNode::mmcCallback(
                 << vector.z << ">" << std::endl
             << "Strength: " << strength << std::endl;
 
-        ConstantDipoleCommand command = {&magnet, strength, dipole_vector};
+        ConstantDipoleCommand command = {&magnet, strength, dipoleVector};
 
         // Add command to the temporary command list
         commandList.push_back(command);
@@ -932,93 +968,44 @@ void OmnimagnetDriverNode::mmrCallback(
     auto freqs = request->rotation_freqs;
     auto strengths = request->dipole_strengths;
     auto offsets = request->phase_offsets;
+    auto duration = request->duration;
 
     std::vector<ActiveMagnetCommand> commandList;
 
-    // Check for size mismatches
-    if (ids.size() < 1) {
-        commandError(
-            this->get_logger(), 
-            "No omnimagnets selected.", 
-            response,
-            "No omnimagnets selected.",
-            timeoutTimer_
-        );
+    std::string errorString;
 
-        return;
-    }
-    if (ids.size() > maxMagnets_) {
+    if (!checkIDs(ids, omnimagnets_, errorString)) {
         commandError(
-            this->get_logger(), 
-            "Too many magnets selected.", 
+            this->get_logger(),
+            errorString,
             response,
-            "Too many magnets selected.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-    if (strengths.size() != 1 && strengths.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Strength size mismatch.", 
-            response,
-            "Dipole strengths list size mismatch.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-    if (freqs.size() != 1 && freqs.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Frequency size mismatch.", 
-            response,
-            "Frequency list size mismatch.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-    if (offsets.size() != 1 && offsets.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Offset size mismatch.", 
-            response,
-            "Offset list size mismatch.",
-            timeoutTimer_
-        );
-
-        return;
-    }
-    if (rotationVectors.size() != 1 && rotationVectors.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Rotation vectors size mismatch.", 
-            response,
-            "Rotation vectors list size mismatch.",
+            errorString,
             timeoutTimer_
         );
 
         return;
     }
 
-    for (auto& id : ids) {
-        if (omnimagnets_.count(id) == 0) {
-            commandError(
-                this->get_logger(), 
-                "Omnimagnet not found.", 
-                response,
-                "Invalid magnet ID: " + std::to_string(id),
-                timeoutTimer_
-            );
+    std::vector<void*> vecs = {&rotationVectors, &freqs, &strengths, &offsets};
+    if (!checkMultipleVectors(
+        ids,
+        errorString,
+        rotationVectors,
+        freqs,
+        strengths,
+        offsets    
+    )) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
 
-            return;
-        }
+        return;
     }
 
-    // Optional duration argument
-    auto duration = request->duration;
     if (duration <= 0.0) {
         commandError(
             this->get_logger(),
@@ -1048,53 +1035,38 @@ void OmnimagnetDriverNode::mmrCallback(
 
         id = ids[i];
 
-        // If only one rotation vector is provided, use it for all magnets; otherwise, use the corresponding rotation vector for each magnet
-        if (rotationVectors.size() == 1)
-            rotationVector = rotationVectors[0];
-        else
-            rotationVector = rotationVectors[i];
+        // For each list, if only one entry is provided, apply it to all, otherwise use corresponding entry
+        rotationVector = (rotationVectors.size() == 1)
+            ? rotationVectors[0]
+            : rotationVectors[i];
 
-        if (strengths.size() == 1)
-            strength = strengths[0];
-        else
-            strength = strengths[i];
-            
-        if (freqs.size() == 1)
-            freq = freqs[0];
-        else
-            freq = freqs[i];
+        strength = (strengths.size() == 1)
+            ? strengths[0]
+            : strengths[i];
 
-        if (offsets.size() == 1)
-            offset = offsets[0];
-        else
-            offset = offsets[i];
+        freq = (freqs.size() == 1)
+            ? freqs[0]
+            : freqs[i];
+
+        offset = (offsets.size() == 1)
+            ? offsets[0]
+            : offsets[i];
 
         // Convert to radians
         auto phaseOffset = offset * M_PI / 180.0;
 
         auto& magnet = omnimagnets_.at(id);
         
+        // Convert vector to Eigen Vector3d
         Eigen::Vector3d rotVec;
         rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
 
-        // Check if the rotation vector is valid (non-zero and finite)
-        if (rotVec.norm() < 1e-8) {
+        if (!validVector(rotVec, errorString)) {
             commandError(
                 this->get_logger(),
-                "Zero rotation vector.",
+                errorString,
                 response,
-                "Zero rotation vector passed.",
-                timeoutTimer_
-            );
-
-            return;
-        }
-        if (!rotVec.allFinite()) {
-            commandError(
-                this->get_logger(),
-                "Invalid rotation vector.",
-                response,
-                "NaN component in rotation vector.",
+                errorString,
                 timeoutTimer_
             );
 
@@ -1104,7 +1076,8 @@ void OmnimagnetDriverNode::mmrCallback(
         // Normalize rotation vector to ensure it has a unit length
         rotVec.normalize();
 
-        RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, makeBasisFromRotationVector(rotVec)};
+        Basis rotationPlane = makeBasisFromRotationVector(rotVec);
+        RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
 
         // Add to temporary command list
         commandList.push_back(command);
@@ -1112,7 +1085,7 @@ void OmnimagnetDriverNode::mmrCallback(
 
         logString
             << "Magnet: " << id << std::endl
-            << "Dipole: <"
+            << "Rotation: <"
                 << rotationVector.x << ", "
                 << rotationVector.y << ", "
                 << rotationVector.z << ">" << std::endl
@@ -1132,6 +1105,508 @@ void OmnimagnetDriverNode::mmrCallback(
 
     RCLCPP_INFO(this->get_logger(), logString.str().c_str());
 }
+
+void OmnimagnetDriverNode::sccCallback(
+    const omnimagnet_interfaces::srv::SingleCurrentConstant::Request::SharedPtr request,
+    const omnimagnet_interfaces::srv::SingleCurrentConstant::Response::SharedPtr response
+) {
+    // Ignore command if another is currently running
+    if (experimentRunning_.load(std::memory_order_acquire)) {
+        commandError(
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
+            response,
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    // Cancel the timeout timer to prevent it from triggering during the operation
+    timeoutTimer_->cancel();
+
+    auto id = request->omnimagnet;
+    auto strength = request->current_strength;
+    auto vector = request->current_vec;
+
+    std::string errorString;
+
+    // Check if the specified magnet ID is valid
+    if (!checkID(id, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+    auto& magnet = omnimagnets_.at(id);
+
+    auto duration = request->duration;
+    if (duration <= 0.0) {
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer_
+        );
+        return;
+    }
+
+    Eigen::Vector3d currentVector;
+    currentVector << vector.x, vector.y, vector.z;
+
+    if (!validVector(currentVector, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    currentVector.normalize();
+    ConstantCurrentCommand command = {&magnet, strength, currentVector};
+
+    // Set up the active command for the specified magnet using a lock guard to ensure thread safety
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        activeCommands_.push_back(command);
+        newCommand_.store(true, std::memory_order_release);
+    }
+
+    resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), 
+        "Beginning Operation\n"
+        "Single Magnet\n"
+        "Mode: Constant Current\n"
+        "Duration %.3f s\n",
+        duration
+    );
+
+    RCLCPP_INFO(this->get_logger(), 
+        "Magnet: %lu\n"
+        "Current: <%.3f, %.3f, %.3f>\n"
+        "Strength: %.2f",
+        id, vector.x, vector.y, vector.z, strength
+    );
+}
+
+void OmnimagnetDriverNode::scrCallback(
+    const omnimagnet_interfaces::srv::SingleCurrentRotation::Request::SharedPtr request,
+    const omnimagnet_interfaces::srv::SingleCurrentRotation::Response::SharedPtr response
+) {
+    // Ignore command if another is currently running
+    if (experimentRunning_.load(std::memory_order_acquire)) {
+        commandError(
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
+            response,
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    // Cancel the timeout timer to prevent it from triggering during the operation
+    timeoutTimer_->cancel();
+
+    auto id = request->omnimagnet;
+    auto strength = request->current_strength;
+    auto rotationVector = request->rotation_vector;
+    auto offset = request->phase_offset;
+    auto phaseOffset = offset * M_PI / 180.0; // Converted to radians
+    auto freq = request->rotation_freq;
+    auto duration = request->duration;
+    
+    std::string errorString;
+
+    // Check if the specified magnet ID is valid
+    if (checkID(id, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+    auto& magnet = omnimagnets_.at(id);
+
+    // Check if duration is positive
+    if (duration <= 0.0) {
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer_
+        );
+        return;
+    }
+    
+    Eigen::Vector3d rotVec;
+    rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
+
+    if (!validVector(rotVec, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    Basis rotationPlane = makeBasisFromRotationVector(rotVec);
+    RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
+
+    // Set up the active command for the specified magnet using a lock guard to ensure thread safety
+    {
+        std::lock_guard<std::mutex> lock (commandMutex_);
+        activeCommands_.push_back(command);
+        newCommand_.store(true, std::memory_order_release);
+    }
+
+    resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), 
+        "Beginning Operation\n"
+        "Single Magnet\n"
+        "Mode: Rotating Current\n"
+        "Duration %.3f s\n",
+        duration
+    );
+
+    RCLCPP_INFO(this->get_logger(), 
+        "Magnet: %lu\n"
+        "Rotation: <%.3f, %.3f, %.3f>\n"
+        "Strength: %.2f\n"
+        "Frequency: %.2f\n"
+        "Offset: %.2f\n",
+        id, rotationVector.x, rotationVector.y, rotationVector.z, strength, freq, offset
+    );
+}
+
+void OmnimagnetDriverNode::mccCallback(
+    const omnimagnet_interfaces::srv::MultiCurrentConstant::Request::SharedPtr request,
+    const omnimagnet_interfaces::srv::MultiCurrentConstant::Response::SharedPtr response
+) {
+    // Ignore command if another is currently running
+    if (experimentRunning_.load(std::memory_order_acquire)) {
+        commandError(
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
+            response,
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    // Cancel the timeout timer to prevent it from triggering during the operation
+    timeoutTimer_->cancel();
+    
+    auto ids = request->omnimagnets;
+    auto strengths = request->current_strengths;
+    auto vectors = request->current_vecs;
+
+    
+    std::vector<ActiveMagnetCommand> commandList;
+    
+    std::string errorString;
+    
+    if (!checkIDs(ids, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+        
+        return;
+    }
+    
+    if (!checkMultipleVectors(
+        ids,
+        errorString,
+        strengths,
+        vectors
+    )) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    auto duration = request->duration;
+    if (duration <= 0.0) {
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    std::stringstream logString;
+
+    logString 
+        << "Beginning Operation" << std::endl
+        << "Multiple Magnets" << std::endl
+        << "Mode: Constant Current" << std::endl
+        << "Duration: " << duration << " s" << std::endl;
+
+    // Set up active commands for each magnet
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        uint64_t id;
+        omnimagnet_interfaces::msg::Vector3 vector;
+        double strength;
+
+        id = ids[i];
+
+        // If only one vector is provided, use it for all magnets; otherwise, use the corresponding vector for each magnet
+        vector = (vectors.size() == 1)
+            ? vectors[0]
+            : vectors[i];
+
+        strength = (strengths.size() == 1)
+            ? strengths[0]
+            : strengths[i];
+
+        auto& magnet = omnimagnets_.at(id);
+        
+        Eigen::Vector3d currentVector;
+        currentVector << vector.x, vector.y, vector.z;
+
+        if (!validVector(currentVector, errorString)) {
+            commandError(
+                this->get_logger(),
+                errorString,
+                response,
+                errorString,
+                timeoutTimer_
+            );
+
+            return;
+        }
+
+        // Normalize dipole vector to ensure it has a unit length
+        currentVector.normalize();
+
+        logString 
+            << "Magnet: " << id << std::endl
+            << "Current: <"
+                << vector.x << ", "
+                << vector.y << ", "
+                << vector.z << ">" << std::endl
+            << "Strength: " << strength << std::endl;
+
+        ConstantDipoleCommand command = {&magnet, strength, currentVector};
+
+        // Add command to the temporary command list
+        commandList.push_back(command);
+    }
+
+    // Store commands for control thread
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        activeCommands_ = std::move(commandList);
+        newCommand_.store(true, std::memory_order_release);
+    }
+
+    resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
+}
+
+void OmnimagnetDriverNode::mcrCallback(
+    const omnimagnet_interfaces::srv::MultiCurrentRotation::Request::SharedPtr request,
+    const omnimagnet_interfaces::srv::MultiCurrentRotation::Response::SharedPtr response
+) {
+    // Ignore command if another is currently running
+    if (experimentRunning_.load(std::memory_order_acquire)) {
+        commandError(
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
+            response,
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
+        );
+
+        return;
+    }
+    
+    // Cancel the timeout timer to prevent it from triggering during the operation
+    timeoutTimer_->cancel();
+
+    auto ids = request->omnimagnets;
+    auto rotationVectors = request->rotation_vectors;
+    auto freqs = request->rotation_freqs;
+    auto strengths = request->current_strengths;
+    auto offsets = request->phase_offsets;
+    auto duration = request->duration;
+
+    std::vector<ActiveMagnetCommand> commandList;
+
+    std::string errorString;
+
+    if (!checkIDs(ids, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    std::vector<void*> vecs = {&rotationVectors, &freqs, &strengths, &offsets};
+    if (!checkMultipleVectors(
+        ids,
+        errorString,
+        rotationVectors,
+        freqs,
+        strengths,
+        offsets    
+    )) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    if (duration <= 0.0) {
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer_
+        );
+        return;
+    }
+
+    std::stringstream logString;
+
+    logString 
+        << "Beginning Operation" << std::endl
+        << "Multiple Magnets" << std::endl
+        << "Mode: Rotating Current" << std::endl
+        << "Duration: " << duration << " s" << std::endl;
+
+    // Set up active commands for each magnet
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        uint64_t id;
+        omnimagnet_interfaces::msg::Vector3 rotationVector;
+        double strength;
+        double offset;
+        double freq;
+
+        id = ids[i];
+
+        // For each list, if only one entry is provided, apply it to all, otherwise use corresponding entry
+        rotationVector = (rotationVectors.size() == 1)
+            ? rotationVectors[0]
+            : rotationVectors[i];
+
+        strength = (strengths.size() == 1)
+            ? strengths[0]
+            : strengths[i];
+
+        freq = (freqs.size() == 1)
+            ? freqs[0]
+            : freqs[i];
+
+        offset = (offsets.size() == 1)
+            ? offsets[0]
+            : offsets[i];
+
+        // Convert to radians
+        auto phaseOffset = offset * M_PI / 180.0;
+
+        auto& magnet = omnimagnets_.at(id);
+        
+        // Convert vector to Eigen Vector3d
+        Eigen::Vector3d rotVec;
+        rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
+
+        if (!validVector(rotVec, errorString)) {
+            commandError(
+                this->get_logger(),
+                errorString,
+                response,
+                errorString,
+                timeoutTimer_
+            );
+
+            return;
+        }
+
+        // Normalize rotation vector to ensure it has a unit length
+        rotVec.normalize();
+
+        Basis rotationPlane = makeBasisFromRotationVector(rotVec);
+        RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
+
+        // Add to temporary command list
+        commandList.push_back(command);
+    
+
+        logString
+            << "Magnet: " << id << std::endl
+            << "Rotation: <"
+                << rotationVector.x << ", "
+                << rotationVector.y << ", "
+                << rotationVector.z << ">" << std::endl
+            << "Strength: " << strength << std::endl
+            << "Frequency: " << freq << std::endl
+            << "Offset: " << offset << std::endl;
+    }
+
+    // Send command list to control thread
+    {
+        std::lock_guard<std::mutex> lock (commandMutex_);
+        activeCommands_ = std::move(commandList);
+        newCommand_.store(true, std::memory_order_release);
+    }
+
+    resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), logString.str().c_str());
+}
+
 
 /**
  * @brief Callback for handling DriverReset service requests.

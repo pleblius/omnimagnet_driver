@@ -1,8 +1,6 @@
-uint64 omnimagnet # Desired omnimagnet ID
-Vector3 rotation_vector
-float64 rotation_freq # Hz
-float64 dipole_strength # Am^2
-float64 phase_offset # Degrees
+uint64 omnimagnet # Number associated with omnimagnet configuration
+Vector3 current_vec
+float64 current_strength # Amps
 float64 duration # Seconds
 ---
 bool error # true if an error prevented driver from implementing desired control
