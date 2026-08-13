@@ -84,6 +84,12 @@ private:
     rclcpp::Service<omnimagnet_interfaces::srv::SingleMagnetConstant>::SharedPtr smcServer_;
     rclcpp::Service<omnimagnet_interfaces::srv::MultiMagnetConstant>::SharedPtr mmcServer_;
     rclcpp::Service<omnimagnet_interfaces::srv::MultiMagnetRotation>::SharedPtr mmrServer_;
+
+    rclcpp::Service<omnimagnet_interfaces::srv::SingleCurrentConstant>::SharedPtr sccServer_;
+    rclcpp::Service<omnimagnet_interfaces::srv::SingleCurrentRotation>::SharedPtr scrServer_;
+    rclcpp::Service<omnimagnet_interfaces::srv::MultiCurrentConstant>::SharedPtr mccServer_;
+    rclcpp::Service<omnimagnet_interfaces::srv::MultiCurrentRotation>::SharedPtr mcrServer_;
+
     rclcpp::Service<omnimagnet_interfaces::srv::DriverReset>::SharedPtr resetServer_;
     
     rclcpp::TimerBase::SharedPtr timeoutTimer_;
@@ -166,5 +172,6 @@ private:
 
 
     void controlLoop();
+    bool systemIsBusy();
 };
 

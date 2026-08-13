@@ -347,6 +347,8 @@ void OmnimagnetDriverNode::setupHardware() {
             "Failed to open D2A device.\n",
             true
         );
+
+        return;
     }
 
     // Setting amplifier inhibitors at 5V. Default pins are 25 & 26
@@ -577,7 +579,7 @@ void OmnimagnetDriverNode::smcCallback(
     const omnimagnet_interfaces::srv::SingleMagnetConstant::Response::SharedPtr response
     ) {
     // Ignore command if another is currently running
-    if (experimentRunning_.load(std::memory_order_acquire)) {
+    if (systemIsBusy()) {
         commandError(
             this->get_logger(),
             "Received command while executing previous command. Disregarding.",
@@ -684,7 +686,7 @@ void OmnimagnetDriverNode::smrCallback(
     const omnimagnet_interfaces::srv::SingleMagnetRotation::Response::SharedPtr response
 ) {
     // Ignore command if another is currently running
-    if (experimentRunning_.load(std::memory_order_acquire)) {
+    if (systemIsBusy()) {
         commandError(
             this->get_logger(),
             "Received command while executing previous command. Disregarding.",
@@ -710,7 +712,7 @@ void OmnimagnetDriverNode::smrCallback(
     std::string errorString;
 
     // Check if the specified magnet ID is valid
-    if (checkID(id, omnimagnets_, errorString)) {
+    if (!checkID(id, omnimagnets_, errorString)) {
         commandError(
             this->get_logger(),
             errorString,
@@ -795,7 +797,7 @@ void OmnimagnetDriverNode::mmcCallback(
     const omnimagnet_interfaces::srv::MultiMagnetConstant::Response::SharedPtr response
 ) {
     // Ignore command if another is currently running
-    if (experimentRunning_.load(std::memory_order_acquire)) {
+    if (systemIsBusy()) {
         commandError(
             this->get_logger(),
             "Received command while executing previous command. Disregarding.",
@@ -948,7 +950,7 @@ void OmnimagnetDriverNode::mmrCallback(
     const omnimagnet_interfaces::srv::MultiMagnetRotation::Response::SharedPtr response
 ) {
     // Ignore command if another is currently running
-    if (experimentRunning_.load(std::memory_order_acquire)) {
+    if (systemIsBusy()) {
         commandError(
             this->get_logger(),
             "Received command while executing previous command. Disregarding.",
@@ -986,7 +988,6 @@ void OmnimagnetDriverNode::mmrCallback(
         return;
     }
 
-    std::vector<void*> vecs = {&rotationVectors, &freqs, &strengths, &offsets};
     if (!checkMultipleVectors(
         ids,
         errorString,
@@ -1103,15 +1104,18 @@ void OmnimagnetDriverNode::mmrCallback(
 
     resetDurationTimer(duration);
 
-    RCLCPP_INFO(this->get_logger(), logString.str().c_str());
+    RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
 }
 
+/**
+ * @brief Callback for Ros2 single current constant service.
+ */
 void OmnimagnetDriverNode::sccCallback(
     const omnimagnet_interfaces::srv::SingleCurrentConstant::Request::SharedPtr request,
     const omnimagnet_interfaces::srv::SingleCurrentConstant::Response::SharedPtr response
 ) {
     // Ignore command if another is currently running
-    if (experimentRunning_.load(std::memory_order_acquire)) {
+    if (systemIsBusy()) {
         commandError(
             this->get_logger(),
             "Received command while executing previous command. Disregarding.",
@@ -1201,12 +1205,15 @@ void OmnimagnetDriverNode::sccCallback(
     );
 }
 
+/**
+ * @brief Callback for Ros2 single current rotation service.
+ */
 void OmnimagnetDriverNode::scrCallback(
     const omnimagnet_interfaces::srv::SingleCurrentRotation::Request::SharedPtr request,
     const omnimagnet_interfaces::srv::SingleCurrentRotation::Response::SharedPtr response
 ) {
     // Ignore command if another is currently running
-    if (experimentRunning_.load(std::memory_order_acquire)) {
+    if (systemIsBusy()) {
         commandError(
             this->get_logger(),
             "Received command while executing previous command. Disregarding.",
@@ -1232,7 +1239,7 @@ void OmnimagnetDriverNode::scrCallback(
     std::string errorString;
 
     // Check if the specified magnet ID is valid
-    if (checkID(id, omnimagnets_, errorString)) {
+    if (!checkID(id, omnimagnets_, errorString)) {
         commandError(
             this->get_logger(),
             errorString,
@@ -1273,7 +1280,7 @@ void OmnimagnetDriverNode::scrCallback(
     }
 
     Basis rotationPlane = makeBasisFromRotationVector(rotVec);
-    RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
+    RotatingCurrentCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
 
     // Set up the active command for the specified magnet using a lock guard to ensure thread safety
     {
@@ -1302,12 +1309,15 @@ void OmnimagnetDriverNode::scrCallback(
     );
 }
 
+/**
+ * @brief Callback for Ros2 Multi-current constant service.
+ */
 void OmnimagnetDriverNode::mccCallback(
     const omnimagnet_interfaces::srv::MultiCurrentConstant::Request::SharedPtr request,
     const omnimagnet_interfaces::srv::MultiCurrentConstant::Response::SharedPtr response
 ) {
     // Ignore command if another is currently running
-    if (experimentRunning_.load(std::memory_order_acquire)) {
+    if (systemIsBusy()) {
         commandError(
             this->get_logger(),
             "Received command while executing previous command. Disregarding.",
@@ -1426,7 +1436,7 @@ void OmnimagnetDriverNode::mccCallback(
                 << vector.z << ">" << std::endl
             << "Strength: " << strength << std::endl;
 
-        ConstantDipoleCommand command = {&magnet, strength, currentVector};
+        ConstantCurrentCommand command = {&magnet, strength, currentVector};
 
         // Add command to the temporary command list
         commandList.push_back(command);
@@ -1444,12 +1454,15 @@ void OmnimagnetDriverNode::mccCallback(
     RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
 }
 
+/**
+ * @brief Callback for Ros2 Multi-current rotation service
+ */
 void OmnimagnetDriverNode::mcrCallback(
     const omnimagnet_interfaces::srv::MultiCurrentRotation::Request::SharedPtr request,
     const omnimagnet_interfaces::srv::MultiCurrentRotation::Response::SharedPtr response
 ) {
     // Ignore command if another is currently running
-    if (experimentRunning_.load(std::memory_order_acquire)) {
+    if (systemIsBusy()) {
         commandError(
             this->get_logger(),
             "Received command while executing previous command. Disregarding.",
@@ -1487,7 +1500,6 @@ void OmnimagnetDriverNode::mcrCallback(
         return;
     }
 
-    std::vector<void*> vecs = {&rotationVectors, &freqs, &strengths, &offsets};
     if (!checkMultipleVectors(
         ids,
         errorString,
@@ -1578,7 +1590,7 @@ void OmnimagnetDriverNode::mcrCallback(
         rotVec.normalize();
 
         Basis rotationPlane = makeBasisFromRotationVector(rotVec);
-        RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
+        RotatingCurrentCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
 
         // Add to temporary command list
         commandList.push_back(command);
@@ -1604,7 +1616,7 @@ void OmnimagnetDriverNode::mcrCallback(
 
     resetDurationTimer(duration);
 
-    RCLCPP_INFO(this->get_logger(), logString.str().c_str());
+    RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
 }
 
 
@@ -1651,24 +1663,25 @@ void OmnimagnetDriverNode::controlLoop() {
     double control_hz = this->get_parameter(
         "timing.control_frequency_hz").as_double();
 
-    auto period = std::chrono::duration<double>(1. / control_hz);
+    const auto period =
+        std::chrono::duration_cast<clock::duration>(
+            std::chrono::duration<double>(1. / control_hz)
+        );
 
     auto startTime = clock::now();
+    auto next = clock::now();
 
     std::vector<ActiveMagnetCommand> localCommands;
 
     // Main control loop that runs while the control thread is active
     while (controlThreadRunning_.load(std::memory_order_acquire)) {
-        auto now = clock::now();
-        const auto next = now + period;
+        next += period;
         
         if (resetCommand_.load(std::memory_order_acquire)) {
-            resetCommand_.store(false, std::memory_order_release);
-            experimentRunning_.store(false, std::memory_order_release);
-
+            
             for (const auto& command : localCommands) {
                 const auto* magnet = commandMagnet(command);
-
+                
                 if (runCurrent(Eigen::Vector3d::Zero(), *magnet) < 0) {
                     systemError(
                         this->get_logger(),
@@ -1680,8 +1693,10 @@ void OmnimagnetDriverNode::controlLoop() {
                     );
                 }
             }
-
+            
             localCommands.clear();
+            resetCommand_.store(false, std::memory_order_release);
+            experimentRunning_.store(false, std::memory_order_release);
         }
 
         if (newCommand_.load(std::memory_order_acquire)) {
@@ -1704,7 +1719,7 @@ void OmnimagnetDriverNode::controlLoop() {
 
         if (experimentRunning_.load(std::memory_order_acquire)) {
             // Calculate the elapsed time since the start of the experiment
-            double t = std::chrono::duration<double>(now - startTime).count();
+            double t = std::chrono::duration<double>(clock::now() - startTime).count();
             
             // Update the currents of the active magnets based on their respective commands (constant or rotating dipoles)
             for (const auto& command : localCommands) {
@@ -1758,9 +1773,6 @@ void OmnimagnetDriverNode::declareParameters() {
     this->declare_parameter<int>(
         "hardware.analog_reference", 0
     );
-    this->declare_parameter<bool>(
-        "hardware.inhibitor.enabled", false
-    );
     this->declare_parameter<std::vector<int>>(
         "hardware.inhibitor.pins", {25, 26}
     );
@@ -1782,7 +1794,7 @@ void OmnimagnetDriverNode::declareParameters() {
         "hardware.max_voltage", 10.0
     );
     this->declare_parameter<double>(
-        "hardware.min_curent", -15.0
+        "hardware.min_current", -15.0
     );
     this->declare_parameter<double>(
         "hardware.max_current", 15.0
@@ -2016,7 +2028,8 @@ void OmnimagnetDriverNode::buildPublishers() {
 void OmnimagnetDriverNode::buildServices() {
     smcServer_ = this->create_service<omnimagnet_interfaces::srv::SingleMagnetConstant>(
         "single_magnet_constant",
-        std::bind(&OmnimagnetDriverNode::smcCallback,
+        std::bind(
+            &OmnimagnetDriverNode::smcCallback,
             this,
             std::placeholders::_1,
             std::placeholders::_2
@@ -2024,7 +2037,8 @@ void OmnimagnetDriverNode::buildServices() {
     );
     smrServer_ = this->create_service<omnimagnet_interfaces::srv::SingleMagnetRotation>(
         "single_magnet_rotation",
-        std::bind(&OmnimagnetDriverNode::smrCallback,
+        std::bind(
+            &OmnimagnetDriverNode::smrCallback,
             this,
             std::placeholders::_1,
             std::placeholders::_2
@@ -2032,7 +2046,8 @@ void OmnimagnetDriverNode::buildServices() {
     );
     mmcServer_ = this->create_service<omnimagnet_interfaces::srv::MultiMagnetConstant>(
         "multi_magnet_constant",
-        std::bind(&OmnimagnetDriverNode::mmcCallback,
+        std::bind(
+            &OmnimagnetDriverNode::mmcCallback,
             this,
             std::placeholders::_1,
             std::placeholders::_2
@@ -2040,12 +2055,51 @@ void OmnimagnetDriverNode::buildServices() {
     );
     mmrServer_ = this->create_service<omnimagnet_interfaces::srv::MultiMagnetRotation>(
         "multi_magnet_rotation",
-        std::bind(&OmnimagnetDriverNode::mmrCallback,
+        std::bind(
+            &OmnimagnetDriverNode::mmrCallback,
             this,
             std::placeholders::_1,
             std::placeholders::_2
         )
     );
+
+    sccServer_ = this->create_service<omnimagnet_interfaces::srv::SingleCurrentConstant>(
+        "single_current_constant",
+        std::bind(
+            &OmnimagnetDriverNode::sccCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+    scrServer_ = this->create_service<omnimagnet_interfaces::srv::SingleCurrentRotation>(
+        "single_current_rotation",
+        std::bind(
+            &OmnimagnetDriverNode::scrCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+    mccServer_ = this->create_service<omnimagnet_interfaces::srv::MultiCurrentConstant>(
+        "multi_current_constant",
+        std::bind(
+            &OmnimagnetDriverNode::mccCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+    mcrServer_ = this->create_service<omnimagnet_interfaces::srv::MultiCurrentRotation>(
+        "multi_current_rotation",
+        std::bind(
+            &OmnimagnetDriverNode::mcrCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+
     resetServer_ = this->create_service<omnimagnet_interfaces::srv::DriverReset>(
         "reset_driver",
         std::bind(&OmnimagnetDriverNode::resetCallback,
@@ -2085,7 +2139,7 @@ lsampl_t OmnimagnetDriverNode::currentD2A(double current) {
  * @return An integer indicating the success or failure of the operation. 
  * A value of 1 indicates success, while a negative value indicates an error in writing to the D2A channels.
  * 
- * @note If any of the writes fails for any reason, all magnets will be reset to 0 current.
+ * @note If any of the writes fails for any reason, all components will be reset to 0 current.
  */
 int OmnimagnetDriverNode::runCurrent(const Eigen::Vector3d& current, const OmniMagnet& magnet) {
     lsampl_t xCurrent = currentD2A(current[0]);
@@ -2120,4 +2174,15 @@ int OmnimagnetDriverNode::runCurrent(const Eigen::Vector3d& current, const OmniM
 		comedi_data_write(card_, subDevice_, pins[0], range_, aref_, currentD2A(0));
 		
 		return retval;
+}
+
+/**
+ * @brief Checks if the system is running a previous command.
+ * 
+ * @return true if the system is already running or processing a command.
+ */
+bool OmnimagnetDriverNode::systemIsBusy() {
+    return 
+        experimentRunning_.load(std::memory_order_acquire) ||
+        newCommand_.load(std::memory_order_acquire);
 }

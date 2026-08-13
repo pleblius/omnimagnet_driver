@@ -28,7 +28,6 @@ omnimagnet_driver:
       max_current: 15.0
 
       inhibitor:
-        enabled: true
         pins: [25, 26]
         voltage: 5.0
 
