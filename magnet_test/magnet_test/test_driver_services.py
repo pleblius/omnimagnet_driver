@@ -10,6 +10,10 @@ from omnimagnet_interfaces.srv import (
     SingleMagnetRotation,
     MultiMagnetConstant,
     MultiMagnetRotation,
+    SingleCurrentConstant,
+    SingleCurrentRotation,
+    MultiCurrentConstant,
+    MultiCurrentRotation,
     DriverReset,
 )
 
@@ -33,6 +37,11 @@ class DriverTester(Node):
         self.smr = self.create_client(SingleMagnetRotation, "single_magnet_rotation")
         self.mmc = self.create_client(MultiMagnetConstant, "multi_magnet_constant")
         self.mmr = self.create_client(MultiMagnetRotation, "multi_magnet_rotation")
+        self.scc = self.create_client(SingleCurrentConstant, "single_current_constant")
+        self.scr = self.create_client(SingleCurrentRotation, "single_current_rotation")
+        self.mcc = self.create_client(MultiCurrentConstant, "multi_current_constant")
+        self.mcr = self.create_client(MultiCurrentRotation, "multi_current_rotation")
+
         self.reset = self.create_client(DriverReset, "reset_driver")
 
     def error_cb(self, msg):
@@ -47,6 +56,10 @@ class DriverTester(Node):
             (self.smr, "single_magnet_rotation"),
             (self.mmc, "multi_magnet_constant"),
             (self.mmr, "multi_magnet_rotation"),
+            (self.scc, "single_current_constant"),
+            (self.scr, "single_current_rotation"),
+            (self.mcc, "multi_current_constant"),
+            (self.mcr, "multi_current_rotation"),
             (self.reset, "reset_driver"),
         ]:
             self.get_logger().info(f"Waiting for {name}...")
@@ -80,22 +93,88 @@ class DriverTester(Node):
         self.reset_driver()
         time.sleep(0.5)
 
-        # Multi magnet constant, shared vector/strength
+        duration = 10.0
+        vect = vec(1.0, 1.0, 1.0)
+
+        # 2. SMC
+        req = SingleMagnetConstant.Request()
+        req.omnimagnet = 5
+        req.dipole_vec = vect
+        req.dipole_strength = 40.0
+        req.duration = duration
+        self.call(self.smc, req, "SMC")
+        time.sleep(duration)
+
+        # 3. SMR
+        req = SingleMagnetRotation.Request()
+        req.omnimagnet = 5
+        req.rotation_vector = vect
+        req.dipole_strength = 40.0
+        req.rotation_freq = 5.0
+        req.phase_offset = 0.0
+        req.duration = duration
+        self.call(self.smr, req, "SMR")
+        time.sleep(duration)
+
+        # 4. SCC
+        req = SingleCurrentConstant.Request()
+        req.omnimagnet = 5
+        req.current_vec = vect
+        req.current_strength = 15.0
+        req.duration = duration
+        self.call(self.scc, req, "SCC")
+        time.sleep(duration)
+
+        # 5. SCR
+        req = SingleCurrentRotation.Request()
+        req.omnimagnet = 5
+        req.rotation_vector = vect
+        req.rotation_freq = 5.0
+        req.phase_offset = 0.0
+        req.current_strength = 15.0
+        req.duration = duration
+        self.call(self.scr, req, "SCR")
+        time.sleep(duration)
+
+        # 6. MMC
         req = MultiMagnetConstant.Request()
-        req.omnimagnets = [3]
-        req.dipole_vecs = [vec(1.0, 0.0, 0.0)]
+        req.omnimagnets = [1, 2, 3, 4, 5]
         req.dipole_strengths = [40.0]
-        req.duration = 20.0
-        self.call(self.mmc, req, "X axis")
-        time.sleep(20.0)
+        req.dipole_vecs = [vect]
+        req.duration = duration
+        self.call(self.mmc, req, "MMC")
+        time.sleep(duration)
 
-        req.dipole_vecs = [vec(0.0, 1.0, 0.0)]
-        self.call(self.mmc, req, "Y axis")
-        time.sleep(20.0)
+        # 7. MMR
+        req = MultiMagnetRotation.Request()
+        req.omnimagnets = [1, 2, 3, 4, 5]
+        req.dipole_strengths = [40.0]
+        req.phase_offsets = [0.0]
+        req.rotation_freqs = [5.0]
+        req.duration = duration
+        req.rotation_vectors = [vect]
+        self.call(self.mmr, req, "MMR")
+        time.sleep(duration)
 
-        req.dipole_vecs = [vec(0.0, 0.0, 1.0)]
-        self.call(self.mmc, req, "Z axis")
-        time.sleep(20.0)
+        # 8. MCC
+        req = MultiCurrentConstant.Request()
+        req.omnimagnets = [1, 2, 3, 4, 5]
+        req.current_strengths = [1.0]
+        req.current_vecs = [vect]
+        req.duration = duration
+        self.call(self.mcc, req, "MCC")
+        time.sleep(duration)
+
+        # 9. MCR
+        req = MultiCurrentRotation.Request()
+        req.omnimagnets = [1, 2, 3, 4, 5]
+        req.current_strengths = [1.0]
+        req.rotation_vectors = [vect]
+        req.rotation_freqs = [5.0]
+        req.phase_offsets = [0.0]
+        req.duration = duration
+        self.call(self.mcr, req, "MCR")
+        time.sleep(duration)
 
         # Final reset
         self.reset_driver()
