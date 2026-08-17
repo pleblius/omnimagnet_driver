@@ -129,6 +129,7 @@ private:
     void setupMagnets();
     lsampl_t currentD2A(double);
     int runCurrent(const Eigen::Vector3d&, const OmniMagnet&);
+    bool shutdownInhibs();
 
     // Timer callbacks
     void timeoutCallback();

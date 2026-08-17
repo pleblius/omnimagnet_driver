@@ -275,19 +275,26 @@ namespace {
  * 
  * @return int Returns 0 on successful execution.
  */
-int main (int argc, char **argv) {
+int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
+    try {
+        auto node = std::make_shared<OmnimagnetDriverNode>();
 
-    auto node = std::make_shared<OmnimagnetDriverNode>();
+        // Bind shutdown method to signal handler for safe program exit
+        rclcpp::on_shutdown(
+            std::bind(&OmnimagnetDriverNode::shutdown, node)
+        );
     
-    // Bind shutdown method to signal handler for safe program exit
-    rclcpp::on_shutdown(
-        std::bind(&OmnimagnetDriverNode::shutdown, node)
-    );
+        rclcpp::spin(node);
+    }
+    catch (const std::exception& err) {
+        std::cerr << "Driver setup failed: " << err.what() << std::endl;
 
-    rclcpp::spin(node);
+        rclcpp::shutdown();
+        return 1;
+    }
+    
     rclcpp::shutdown();
-
     return 0;
 }
 
@@ -321,6 +328,8 @@ OmnimagnetDriverNode::OmnimagnetDriverNode() :
  * It also checks for errors during the hardware setup process and publishes error messages if any issues arise.
  * If the hardware setup is successful, it logs a message indicating that the hardware setup is complete.
  * If any errors occur during the hardware setup, it logs the error and shuts down the ROS2 node.
+ * 
+ * @throws std::runtime_error if it fails to open the D2A or correctly write to the inhibit pins.
  */
 void OmnimagnetDriverNode::setupHardware() {
     subDevice_  = this->get_parameter("hardware.subdevice").as_int();
@@ -349,7 +358,7 @@ void OmnimagnetDriverNode::setupHardware() {
             true
         );
 
-        return;
+        throw std::runtime_error("Failed to Open D2A device.");
     }
 
     // Setting amplifier inhibitors at 5V. Default pins are 25 & 26
@@ -369,7 +378,8 @@ void OmnimagnetDriverNode::setupHardware() {
                 true
             );
 
-            return;
+            shutdownInhibs();
+            throw std::runtime_error("Failed to set enable pins.");
         }
     }
 
@@ -454,7 +464,6 @@ void OmnimagnetDriverNode::shutdown() {
         controlThread_.join();
     }
 
-    // D2A should have been initialized, but check for safety.
     if (card_ == nullptr) {
         std::cerr << "D2A was null during shutdown:" << std::endl <<
         "Hardware may not have been properly initialized" << std::endl;
@@ -485,7 +494,19 @@ void OmnimagnetDriverNode::shutdown() {
         std::cerr << "Failed to shut down all magnets." << std::endl;
     }
 
-    // Shut down amplifier enable pins. Logs failures and continues.
+    // Shut down amplifier inhibitors
+    shutdownInhibs();
+
+    comedi_close(card_);
+    card_ = nullptr;
+}
+
+/**
+ * @brief Sets the inhibitor pins to 0V.
+ * 
+ * @return true if all pins were shut down.
+ */
+bool OmnimagnetDriverNode::shutdownInhibs() {
     bool pinFail = false;
 
     for (const auto& pin : inhibPins_) {
@@ -504,6 +525,8 @@ void OmnimagnetDriverNode::shutdown() {
     else {
         std::cerr << "Failed to shut down power supply enable pins, use emergency stop!" << std::endl;
     }
+
+    return pinFail;
 }
 
 /*************** TIMER CALLBACKS ***************/
@@ -1669,15 +1692,14 @@ void OmnimagnetDriverNode::controlLoop() {
         );
 
     auto startTime = clock::now();
-    auto next = clock::now();
     double dt;
 
     std::vector<ActiveMagnetCommand> localCommands;
 
+    auto next = clock::now() + period;
+
     // Main control loop that runs while the control thread is active
     while (true) {
-        next += period;
-
         switch (runMode_.load(std::memory_order_acquire)) {
             case DriverMode::RESET:
                 resetCommands(localCommands);
@@ -1702,10 +1724,21 @@ void OmnimagnetDriverNode::controlLoop() {
         }
 
         // Sleep until the next control cycle to maintain the desired control frequency
-        std::this_thread::sleep_until(next);
+        auto now = clock::now();
+
+        if (next < now) {
+            next = now + period;
+        }
+        else {
+            std::this_thread::sleep_until(next);
+            next += period;
+        }
     }
 }
 
+/**
+ * @brief Resets the control thread, clearing the local commands and setting the thread to IDLE.
+ */
 void OmnimagnetDriverNode::resetCommands(std::vector<ActiveMagnetCommand>& commands) {       
     for (const auto& command : commands) {
         const auto* magnet = commandMagnet(command);
@@ -1726,6 +1759,9 @@ void OmnimagnetDriverNode::resetCommands(std::vector<ActiveMagnetCommand>& comma
     runMode_.store(DriverMode::IDLE, std::memory_order_release);
 }
 
+/**
+ * @brief Loads a new command set into local and sets the driver to RUNNING.
+ */
 void OmnimagnetDriverNode::loadNewCommands(std::vector<ActiveMagnetCommand>& commands) {
     // Copy commands to local environment
     {
@@ -1737,6 +1773,9 @@ void OmnimagnetDriverNode::loadNewCommands(std::vector<ActiveMagnetCommand>& com
     runMode_.store(DriverMode::RUNNING, std::memory_order_release);
 }
 
+/**
+ * @brief Runs the command set with the given delta-time. Sends and error and resets if a magnet fails to write.
+ */
 void OmnimagnetDriverNode::runCommands(
     std::vector<ActiveMagnetCommand>& commands,
     double dt
@@ -2202,5 +2241,5 @@ int OmnimagnetDriverNode::runCurrent(const Eigen::Vector3d& current, const OmniM
 bool OmnimagnetDriverNode::systemIsBusy() {
     auto mode = runMode_.load(std::memory_order_acquire);
 
-    return mode == DriverMode::RUNNING || mode == DriverMode::NEW_COMMAND;
+    return mode != DriverMode::IDLE;
 }
