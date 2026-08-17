@@ -50,6 +50,14 @@ struct ParameterException : public std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+enum class DriverMode {
+    OFF,
+    IDLE,
+    RUNNING,
+    NEW_COMMAND,
+    RESET
+};
+
 class OmnimagnetDriverNode : public rclcpp::Node {
 
 public:
@@ -63,13 +71,11 @@ private:
     double timeout_;
 
     // Thread Managers
-    std::thread controlThread_;
+    std::atomic<DriverMode> runMode_{DriverMode::OFF};
 
-    std::atomic<bool> controlThreadRunning_{false};
-    std::atomic<bool> experimentRunning_{false};
-    std::atomic<bool> resetCommand_{false};
-    std::atomic<bool> newCommand_{false};
+    std::thread controlThread_;
     std::mutex commandMutex_;
+
 
 
     // Containers
@@ -172,6 +178,10 @@ private:
 
 
     void controlLoop();
+    void resetCommands(std::vector<ActiveMagnetCommand>&);
+    void loadNewCommands(std::vector<ActiveMagnetCommand>&);
+    void runCommands(std::vector<ActiveMagnetCommand>&, double);
+
     bool systemIsBusy();
 };
 

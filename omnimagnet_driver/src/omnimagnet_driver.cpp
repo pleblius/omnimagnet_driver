@@ -308,7 +308,8 @@ OmnimagnetDriverNode::OmnimagnetDriverNode() :
     setupHardware();
     setupMagnets();
 
-    controlThreadRunning_.store(true, std::memory_order_release);
+    // Activate control thread
+    runMode_.store(DriverMode::IDLE, std::memory_order_release);
     controlThread_ = std::thread(&OmnimagnetDriverNode::controlLoop, this);
 }
 
@@ -443,12 +444,11 @@ void OmnimagnetDriverNode::shutdown() {
     if (already_shutdown.exchange(true)) {
         return;
     }
-    already_shutdown.store(true, std::memory_order_release);
 
     std::cout << "Beginning Shutdown" << std::endl;
 
     // Stop the control thread and wait for it to finish.
-    controlThreadRunning_.store(false, std::memory_order_release);
+    runMode_.store(DriverMode::OFF, std::memory_order_release);
 
     if (controlThread_.joinable()) {
         controlThread_.join();
@@ -555,7 +555,7 @@ void OmnimagnetDriverNode::durationCallback() {
 
     finishedPublisher_->publish(msg);
 
-    resetCommand_.store(true, std::memory_order_release);
+    runMode_.store(DriverMode::RESET, std::memory_order_release);
 
     // Reset timeout timer to wait for next command
     timeoutTimer_->reset();
@@ -650,7 +650,7 @@ void OmnimagnetDriverNode::smcCallback(
     {
         std::lock_guard<std::mutex> lock(commandMutex_);
         activeCommands_.push_back(command);
-        newCommand_.store(true, std::memory_order_release);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
 
     resetDurationTimer(duration);
@@ -759,7 +759,7 @@ void OmnimagnetDriverNode::smrCallback(
     {
         std::lock_guard<std::mutex> lock (commandMutex_);
         activeCommands_.push_back(command);
-        newCommand_.store(true, std::memory_order_release);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
 
     resetDurationTimer(duration);
@@ -927,7 +927,7 @@ void OmnimagnetDriverNode::mmcCallback(
     {
         std::lock_guard<std::mutex> lock(commandMutex_);
         activeCommands_ = std::move(commandList);
-        newCommand_.store(true, std::memory_order_release);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
 
     resetDurationTimer(duration);
@@ -1099,7 +1099,7 @@ void OmnimagnetDriverNode::mmrCallback(
     {
         std::lock_guard<std::mutex> lock (commandMutex_);
         activeCommands_ = std::move(commandList);
-        newCommand_.store(true, std::memory_order_release);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
 
     resetDurationTimer(duration);
@@ -1184,7 +1184,7 @@ void OmnimagnetDriverNode::sccCallback(
     {
         std::lock_guard<std::mutex> lock(commandMutex_);
         activeCommands_.push_back(command);
-        newCommand_.store(true, std::memory_order_release);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
 
     resetDurationTimer(duration);
@@ -1286,7 +1286,7 @@ void OmnimagnetDriverNode::scrCallback(
     {
         std::lock_guard<std::mutex> lock (commandMutex_);
         activeCommands_.push_back(command);
-        newCommand_.store(true, std::memory_order_release);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
 
     resetDurationTimer(duration);
@@ -1446,7 +1446,7 @@ void OmnimagnetDriverNode::mccCallback(
     {
         std::lock_guard<std::mutex> lock(commandMutex_);
         activeCommands_ = std::move(commandList);
-        newCommand_.store(true, std::memory_order_release);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
 
     resetDurationTimer(duration);
@@ -1611,7 +1611,7 @@ void OmnimagnetDriverNode::mcrCallback(
     {
         std::lock_guard<std::mutex> lock (commandMutex_);
         activeCommands_ = std::move(commandList);
-        newCommand_.store(true, std::memory_order_release);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
 
     resetDurationTimer(duration);
@@ -1639,7 +1639,7 @@ void OmnimagnetDriverNode::resetCallback(
 
     RCLCPP_INFO(this->get_logger(), "System reset by command.");
 
-    resetCommand_.store(true, std::memory_order_release);
+    runMode_.store(DriverMode::RESET, std::memory_order_release);
 
     // Reset the timeout timer to wait for the next command
     timeoutTimer_->reset();
@@ -1670,77 +1670,95 @@ void OmnimagnetDriverNode::controlLoop() {
 
     auto startTime = clock::now();
     auto next = clock::now();
+    double dt;
 
     std::vector<ActiveMagnetCommand> localCommands;
 
     // Main control loop that runs while the control thread is active
-    while (controlThreadRunning_.load(std::memory_order_acquire)) {
+    while (true) {
         next += period;
-        
-        if (resetCommand_.load(std::memory_order_acquire)) {
+
+        switch (runMode_.load(std::memory_order_acquire)) {
+            case DriverMode::RESET:
+                resetCommands(localCommands);
+                break;
             
-            for (const auto& command : localCommands) {
-                const auto* magnet = commandMagnet(command);
-                
-                if (runCurrent(Eigen::Vector3d::Zero(), *magnet) < 0) {
-                    systemError(
-                        this->get_logger(),
-                        "Failed to shut down magnet " + std::to_string(magnet->ID()) + ". Shutting down.",
-                        "comedi_data_write",
-                        errorPublisher_,
-                        "Failed to shut down magnet " + std::to_string(magnet->ID()) + ". Shutting down.",
-                        true
-                    );
-                }
-            }
-            
-            localCommands.clear();
-            resetCommand_.store(false, std::memory_order_release);
-            experimentRunning_.store(false, std::memory_order_release);
-        }
+            case DriverMode::NEW_COMMAND:
+                startTime = clock::now();
+                loadNewCommands(localCommands);
+                break;
 
-        if (newCommand_.load(std::memory_order_acquire)) {
-            // Reset start time
-            startTime = clock::now();
+            case DriverMode::RUNNING:
+                dt = std::chrono::duration<double>(clock::now() - startTime).count();
+                runCommands(localCommands, dt);
+                break;
 
-            // Copy commands to local environment
-            {
-                std::lock_guard<std::mutex> lock(commandMutex_);
-                localCommands = std::move(activeCommands_);
-                activeCommands_.clear();
-            }
+            case DriverMode::OFF:
+                return;
 
-            // Set experiment flag to true
-            experimentRunning_.store(true, std::memory_order_release);
-
-            // Reset newCommand flag
-            newCommand_.store(false, std::memory_order_release);
-        }
-
-        if (experimentRunning_.load(std::memory_order_acquire)) {
-            // Calculate the elapsed time since the start of the experiment
-            double t = std::chrono::duration<double>(clock::now() - startTime).count();
-            
-            // Update the currents of the active magnets based on their respective commands (constant or rotating dipoles)
-            for (const auto& command : localCommands) {
-                const auto current = currentAtTime(command, t);
-                const auto* magnet = commandMagnet(command);
-
-                if (runCurrent(current, *magnet) < 0) {
-                    systemError(
-                        this->get_logger(),
-                        "Failed to write current to magnet " + std::to_string(magnet->ID()),
-                        "comedi_data_write",
-                        errorPublisher_,
-                        "Failed to write current to magnet " + std::to_string(magnet->ID()) + ". Shutting down.",
-                        true
-                    );
-                }
-            }
+            case DriverMode::IDLE:
+            default:
+                break;
         }
 
         // Sleep until the next control cycle to maintain the desired control frequency
         std::this_thread::sleep_until(next);
+    }
+}
+
+void OmnimagnetDriverNode::resetCommands(std::vector<ActiveMagnetCommand>& commands) {       
+    for (const auto& command : commands) {
+        const auto* magnet = commandMagnet(command);
+        
+        if (runCurrent(Eigen::Vector3d::Zero(), *magnet) < 0) {
+            systemError(
+                this->get_logger(),
+                "Failed to shut down magnet " + std::to_string(magnet->ID()) + ". Shutting down.",
+                "comedi_data_write",
+                errorPublisher_,
+                "Failed to shut down magnet " + std::to_string(magnet->ID()) + ". Shutting down.",
+                true
+            );
+        }
+    }
+    
+    commands.clear();
+    runMode_.store(DriverMode::IDLE, std::memory_order_release);
+}
+
+void OmnimagnetDriverNode::loadNewCommands(std::vector<ActiveMagnetCommand>& commands) {
+    // Copy commands to local environment
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        commands = std::move(activeCommands_);
+        activeCommands_.clear();
+    }
+
+    runMode_.store(DriverMode::RUNNING, std::memory_order_release);
+}
+
+void OmnimagnetDriverNode::runCommands(
+    std::vector<ActiveMagnetCommand>& commands,
+    double dt
+) {
+    // Update the currents of the active magnets based on their respective commands (constant or rotating dipoles)
+    for (const auto& command : commands) {
+        const auto current = currentAtTime(command, dt);
+        const auto* magnet = commandMagnet(command);
+
+        if (runCurrent(current, *magnet) < 0) {
+            systemError(
+                this->get_logger(),
+                "Failed to write current to magnet " + std::to_string(magnet->ID()),
+                "comedi_data_write",
+                errorPublisher_,
+                "Failed to write current to magnet " + std::to_string(magnet->ID()) + ". Shutting down.",
+                true
+            );
+
+            runMode_.store(DriverMode::RESET, std::memory_order_release);
+            return;
+        }
     }
 }
 
@@ -2182,7 +2200,7 @@ int OmnimagnetDriverNode::runCurrent(const Eigen::Vector3d& current, const OmniM
  * @return true if the system is already running or processing a command.
  */
 bool OmnimagnetDriverNode::systemIsBusy() {
-    return 
-        experimentRunning_.load(std::memory_order_acquire) ||
-        newCommand_.load(std::memory_order_acquire);
+    auto mode = runMode_.load(std::memory_order_acquire);
+
+    return mode == DriverMode::RUNNING || mode == DriverMode::NEW_COMMAND;
 }
