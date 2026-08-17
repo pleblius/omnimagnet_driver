@@ -20,6 +20,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MultiMagnetRotation.srv"
   "srv/SingleMagnetConstant.srv"
   "srv/SingleMagnetRotation.srv"
+  "srv/SingleCurrentConstant.srv"
+  "srv/SingleCurrentRotation.srv"
+  "srv/MultiCurrentConstant.srv"
+  "srv/MultiCurrentRotation.srv"
 )
 
 ament_export_dependencies(rosidl_default_runtime)

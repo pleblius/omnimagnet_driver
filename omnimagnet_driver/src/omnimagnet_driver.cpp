@@ -1,14 +1,13 @@
 #include "rclcpp/rclcpp.hpp"
-#include "../include/omnimagnet_driver/omnimagnet.hpp"
 #include "comedilib.hpp"
+#include "../include/omnimagnet_driver/omnimagnet.hpp"
 #include "../include/omnimagnet_driver/omnimagnet_driver.hpp"
+#include "../include/omnimagnet_driver/commands.hpp"
 
 #include <atomic>
-#include <chrono>
 #include <thread>
-#include <vector>
-#include <map>
 #include <iomanip>
+#include <any>
 
 // Helper functions
 namespace {
@@ -95,28 +94,173 @@ namespace {
     }
 
     /**
-     * @brief Constructs a Basis struct from a given axis vector.
+     * @brief Constructs a Basis struct orthogonal to the provided vector.
      * 
-     * This function takes an axis vector and constructs a 2D plane with basis vectors u and v 
-     * that are orthogonal to the provided axis using Gram-Schmidt orthogonalization. 
+     * This function takes an axis vector and constructs a 2D plane orthogonal to that vector. It then
+     * generates an orthonormal basis defining that rotation plane.
      * 
      * @param axis The axis vector to construct the basis from.
      * 
-     * @return A Basis struct containing the orthogonal basis vectors u and v.
+     * @return A Basis struct containing the orthonormal basis vectors u and v.
+     * 
+     * @note This method is deterministic, but to maintain numerical stability small changes to the input may produce large changes in the resulting basis vectors
+     * even though the rotation plane remains identical.
      */
     Basis makeBasisFromRotationVector(const Eigen::Vector3d& axis) {
         Eigen::Vector3d n = axis.normalized();
 
-        // Chooses initial vector to cross axis with. Defaults to 'x', but will choose 'y' if it is nearly parallel to 'x'.
+        // Choose initial vector to cross with based on which it is least parallel to
         Eigen::Vector3d initVec =
-            (std::abs(n.x()) < 0.9)
+            (std::abs(n.x()) < std::abs(n.y()))
                 ? Eigen::Vector3d::UnitX()
                 : Eigen::Vector3d::UnitY();
 
-        Eigen::Vector3d u = n.cross(initVec).normalized();
-        Eigen::Vector3d v = n.cross(u).normalized();
+        Eigen::Vector3d u = n.cross(initVec);
+        Eigen::Vector3d v = n.cross(u);
 
         return Basis(u, v);
+    }
+
+	/**
+	 * @brief Maps a value from one range to another.
+	 * 
+	 * This function takes an input value and maps it from the range [val_min, val_max] to the range [range_min, range_max].
+	 * If the input value is outside the input range, it will be clamped to the nearest boundary of the output range.
+	 * 
+	 * @param value The input value to be mapped.
+	 * @param val_min The minimum value of the input range.
+	 * @param val_max The maximum value of the input range.
+	 * @param range_min The minimum value of the output range.
+	 * @param range_max The maximum value of the output range.
+	 * 
+	 * @return The mapped value in the output range.
+	 * 
+	 * @tparam inType The type of the input value.
+	 * @tparam outType The type of the output value.
+	 * 
+	 * @throws std::invalid_argument if the input range has zero width.
+	 * 
+	 * @note Generic types must support arithmetic operations and type casting to double.
+	 */
+	template <typename inType, typename outType>
+	outType mapRange(inType value, inType val_min, inType val_max, outType range_min, outType range_max) {
+		if (val_min == val_max) {
+			throw std::invalid_argument("Input range has zero width.");
+		}
+
+		if (value >= val_max)
+			return range_max;
+		if (value <= val_min)
+			return range_min;
+
+		return static_cast<outType>(
+			static_cast<double>(value - val_min) * 
+			static_cast<double>(range_max - range_min) / 
+			static_cast<double>(val_max - val_min) + 
+			range_min
+		);
+	}
+
+    /**
+     * @brief Checks if a vector is valid for driver use. Checks for zero vectors and non-finite components.
+     * 
+     * @param vector The 3x1 vector to check for validity.
+     * @param output An error string if the vector is invalid.
+     * 
+     * @return true if the vector is valid.
+     */
+    bool validVector(const Eigen::Vector3d& vector, std::string& output) {
+        // Check for NaN
+        if (!vector.allFinite()) {
+            output = "User passed non-finite vector.";
+
+            return false;
+        }
+
+        // Check for zero vectors
+        if (vector.isApprox(Eigen::Vector3d::Zero())) {
+            output = "User passed zero vector.";
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Checks if a magnet ID is contained in the magnet map.
+     * 
+     * @param id Magnet id.
+     * @param map Map of IDs to magnet objects.
+     * @param output Contains error string if vector is invalid.
+     * 
+     * @return true if the id is valid.
+     */
+    bool checkID(
+        int id,
+        const std::map<int, OmniMagnet>& map,
+        std::string& output
+    ) {
+        if (map.count(id) == 0) {
+            output = "Magnet ID " + std::to_string(id) + " not found.";
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Checks an vector of magnet IDs for validity.
+     * 
+     * @param ids Vector containing list of magnet IDs.
+     * @param map Mapping of integer ids to magnet objects.
+     * @param output Contains error string if vector is invalid.
+     * 
+     * @return true if ID vector is valid.
+     */
+    bool checkIDs(
+        const std::vector<uint64_t>& ids,
+        const std::map<int, OmniMagnet>& map,
+        std::string& output
+    ) {
+        if (ids.size() < 1) {
+            output = "No magnets selected.";
+
+            return false;
+        }
+
+        // Check if map contains id
+        for (auto& id : ids) {
+            if (!checkID(id, map, output))
+                return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Checks if each vector has a valid number of elements, either exactly 1 element or the same number of elements as the ids vector.
+     * 
+     * @param ids Vector of magnet ids.
+     * @param output Contains error string if check fails.
+     * @param vecs Variadic argument of all vectors to check.
+     * 
+     * @return true if all vectors are a valid size.
+     */
+    template <typename... Vecs>
+    bool checkMultipleVectors(
+        const std::vector<uint64_t>& ids,
+        std::string& output,
+        const Vecs&... vecs
+    ) {
+        bool isValid =
+            ((vecs.size() == 1 || vecs.size() == ids.size()) && ...);
+
+        if (!isValid)
+            output = "Vector size mismatch.";
+
+        return isValid;
     }
 }
 
@@ -128,21 +272,29 @@ namespace {
  * 
  * @param argc The number of command line arguments.
  * @param argv The array of command line arguments.
+ * 
  * @return int Returns 0 on successful execution.
  */
-int main (int argc, char **argv) {
+int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
+    try {
+        auto node = std::make_shared<OmnimagnetDriverNode>();
 
-    auto node = std::make_shared<OmnimagnetDriverNode>();
+        // Bind shutdown method to signal handler for safe program exit
+        rclcpp::on_shutdown(
+            std::bind(&OmnimagnetDriverNode::shutdown, node)
+        );
     
-    // Bind shutdown method to signal handler for safe program exit
-    rclcpp::on_shutdown(
-        std::bind(&OmnimagnetDriverNode::shutdown, node)
-    );
+        rclcpp::spin(node);
+    }
+    catch (const std::exception& err) {
+        std::cerr << "Driver setup failed: " << err.what() << std::endl;
 
-    rclcpp::spin(node);
+        rclcpp::shutdown();
+        return 1;
+    }
+    
     rclcpp::shutdown();
-
     return 0;
 }
 
@@ -154,20 +306,18 @@ int main (int argc, char **argv) {
  * and starts the control loop in a separate thread.
  */
 OmnimagnetDriverNode::OmnimagnetDriverNode() : 
-    Node ("omnimagnet_driver") {
-
-    offVector << 0.0, 0.0, 0.0;
+    rclcpp::Node ("omnimagnet_driver") {
 
     declareParameters();
-    loadParameters();
     buildTimers();
     buildPublishers();
     buildServices();
     setupHardware();
     setupMagnets();
 
-    controlThreadRunning.store(true, std::memory_order_release);
-    controlThread = std::thread(&OmnimagnetDriverNode::controlLoop, this);
+    // Activate control thread
+    runMode_.store(DriverMode::IDLE, std::memory_order_release);
+    controlThread_ = std::thread(&OmnimagnetDriverNode::controlLoop, this);
 }
 
 /**
@@ -178,76 +328,62 @@ OmnimagnetDriverNode::OmnimagnetDriverNode() :
  * It also checks for errors during the hardware setup process and publishes error messages if any issues arise.
  * If the hardware setup is successful, it logs a message indicating that the hardware setup is complete.
  * If any errors occur during the hardware setup, it logs the error and shuts down the ROS2 node.
+ * 
+ * @throws std::runtime_error if it fails to open the D2A or correctly write to the inhibit pins.
  */
 void OmnimagnetDriverNode::setupHardware() {
-    auto subdev = this->get_parameter("hardware.subdevice").as_int();
-    auto aref   = this->get_parameter("hardware.analog_reference").as_int();
-    auto device = this->get_parameter("hardware.device").as_string();
-    auto pct    = this->get_parameter("hardware.inhibitor.percent").as_double();
-    // Currently unused - Parameters were used in previous implementations, unsure of ultimate purpose, potential deletion candidates
-    // auto chan   = this->get_parameter("hardware.channel").as_int();  // Currently unused - unsure of purpose
-    // auto range  = this->get_parameter("hardware.range").as_int();    // Currently unused - comedi_get_maxdata() is used to determine range
-    
-    auto inhibs = this->get_parameter("hardware.inhibitor.pins").as_integer_array();
-    // This check might be redundant, as the parameter is declared with a size of 2, but it is kept for safety.
-    // If hardware changes, this might need to be updated.
-    if (inhibs.size() != 2) {
-        RCLCPP_ERROR(this->get_logger(), "Need to specify two inhibitor pins.");
-        rclcpp::shutdown();
-    }
-    auto inhbp1 = inhibs.at(0); 
-    auto inhbp2 = inhibs.at(1);
+    subDevice_  = this->get_parameter("hardware.subdevice").as_int();
+    aref_       = this->get_parameter("hardware.analog_reference").as_int();
+    range_      = this->get_parameter("hardware.range").as_int();
+    channel_    = this->get_parameter("hardware.channel").as_int();
+    device_     = this->get_parameter("hardware.device").as_string();
+    inhibVolt_  = this->get_parameter("hardware.inhibitor.voltage").as_double();
+    inhibPins_  = this->get_parameter("hardware.inhibitor.pins").as_integer_array();
+    minSample_  = this->get_parameter("hardware.min_sample").as_int();
+    maxSample_  = this->get_parameter("hardware.max_sample").as_int();
+    minVoltage_ = this->get_parameter("hardware.min_voltage").as_double();
+    maxVoltage_ = this->get_parameter("hardware.max_voltage").as_double();
+    minCurrent_ = this->get_parameter("hardware.min_current").as_double();
+    maxCurrent_ = this->get_parameter("hardware.max_current").as_double();
 
     // Open the D2A device
-    D2A = comedi_open(device.c_str());
-    if(D2A == nullptr) {
+    card_ = comedi_open(device_.c_str());
+    if (card_ == nullptr) {
         systemError(
             this->get_logger(),
             "Failed to open D2A:",
             "comedi_open",
-            errorPublisher,
+            errorPublisher_,
             "Failed to open D2A device.\n",
             true
         );
+
+        throw std::runtime_error("Failed to Open D2A device.");
     }
 
-    // Setting amplifier inhibitors at 75%. Default pins are 25 & 26
-    this->maxdata1  = comedi_get_maxdata(D2A, subdev, inhbp1);
-    this->maxdata2  = comedi_get_maxdata(D2A, subdev, inhbp2);
-    lsampl_t inhib1 = maxdata1 * pct;
-    lsampl_t inhib2 = maxdata2 * pct;
+    // Setting amplifier inhibitors at 5V. Default pins are 25 & 26
 
-    // Inhibitor pin 1
-    int r25 = comedi_data_write(D2A, subdev, inhbp1, 0, aref, inhib1);
-    if (r25 < 0) {
-        systemError(
-            this->get_logger(),
-            "Failed to inhibit pin " + std::to_string(inhbp1) + ":",
-            "comedi_data_write",
-            errorPublisher,
-            "Failed to set inhibitor on D2A pin" + std::to_string(inhbp1) + ".\n",
-            true
-        );
+    for (const auto& pin : inhibPins_) {
+        auto sample = mapRange<double, lsampl_t>(inhibVolt_, minVoltage_, maxVoltage_, minSample_, maxSample_);
+        auto retVal = comedi_data_write(card_, subDevice_, pin, range_, aref_, sample);
 
-        return;
+        // If failed to enable pin, send system error and shutdown system
+        if (retVal < 0) {
+            systemError(
+                this->get_logger(),
+                "Failed to set enable pin " + std::to_string(pin) + ":",
+                "comedi_data_write",
+                errorPublisher_,
+                "Failed to set enable pin " + std::to_string(pin) + ".\n",
+                true
+            );
+
+            shutdownInhibs();
+            throw std::runtime_error("Failed to set enable pins.");
+        }
     }
 
-    // Inhibitor pin 2
-    int r26 = comedi_data_write(D2A, subdev, inhbp2, 0, aref, inhib2);
-    if (r26 < 0) {
-        systemError(
-            this->get_logger(),
-            "Failed to inhibit pin " + std::to_string(inhbp2) + ":",
-            "comedi_data_write",
-            errorPublisher,
-            "Failed to set inhibitor on D2A pin" + std::to_string(inhbp2) + ".\n",
-            true
-        );
-
-        return;
-    }
-
-    RCLCPP_INFO(this->get_logger(), "Hardware setup complete.");
+    RCLCPP_INFO(this->get_logger(), "Hardware setup complete. Power supply enabled.");
 }
 
 /**
@@ -264,14 +400,16 @@ void OmnimagnetDriverNode::setupHardware() {
 void OmnimagnetDriverNode::setupMagnets() {
     // Max magnets is currently hard-coded as a static constant in omnimagnet_driver.hpp, 
     // to allow for fixed-size command arrays to increase performance. This might be unnecessary. 
-    for (std::size_t i = 1; i < maxMagnets; ++i) {
+    for (std::size_t i = 1; i <= maxMagnets_; ++i) {
         const MagnetConfig config = loadMagnetConfig(i);
 
+        // Skip if magnet is set to disabled
         if (!config.enabled)
             continue;
 
+        // Tries to insert magnet into map with desired ID
         auto [iterator, inserted] =
-            omnimagnets.try_emplace(config.id);
+            omnimagnets_.try_emplace(config.id);
 
         // Check if the same ID is loaded twice
         if (!inserted) {
@@ -282,34 +420,17 @@ void OmnimagnetDriverNode::setupMagnets() {
 
         OmniMagnet& magnet = iterator->second;
 
-        magnet.SetProp(
-            config.wire_width,
-            config.inner_wire_length,
-            config.mid_wire_length,
-            config.outer_wire_length,
-            config.core_size,
-            config.inner_channel,
-            config.mid_channel,
-            config.outer_channel,
-            config.estimate,
-            D2A
-        );
-
         try {
-            magnet.SetFrame(config.frame);
+            magnet.setProp(config);
         }
         catch (const std::invalid_argument& err) {
             throw ParameterException("Invalid frame for Magnet " + std::to_string(config.id) + ": " + err.what());
         }
 
-        magnet.UpdateMapping();
-        magnet.setD2AMax(this->maxdata1);
-        magnet.ID = config.id;
-
         RCLCPP_INFO(this->get_logger(), "Configured magnet %d from parameter index %zu", config.id, i);
     }
 
-    RCLCPP_INFO(this->get_logger(), "Magnet setup complete: %zu magnet(s) enabled.", omnimagnets.size());
+    RCLCPP_INFO(this->get_logger(), "Magnet setup complete: %zu magnet(s) enabled.", omnimagnets_.size());
 }
 
 /**
@@ -333,19 +454,17 @@ void OmnimagnetDriverNode::shutdown() {
     if (already_shutdown.exchange(true)) {
         return;
     }
-    already_shutdown.store(true, std::memory_order_release);
 
     std::cout << "Beginning Shutdown" << std::endl;
 
     // Stop the control thread and wait for it to finish.
-    experimentRunning.store(false, std::memory_order_release);
-    controlThreadRunning.store(false, std::memory_order_release);
-    if (controlThread.joinable()) {
-        controlThread.join();
+    runMode_.store(DriverMode::OFF, std::memory_order_release);
+
+    if (controlThread_.joinable()) {
+        controlThread_.join();
     }
 
-    // D2A should have been initialized, but check for safety.
-    if (D2A == nullptr) {
+    if (card_ == nullptr) {
         std::cerr << "D2A was null during shutdown:" << std::endl <<
         "Hardware may not have been properly initialized" << std::endl;
 
@@ -354,8 +473,8 @@ void OmnimagnetDriverNode::shutdown() {
 
     // Turn off all magnets. Log any failures, but continue to attempt to turn off all magnets.
     bool magnetFail = false;
-    for (auto & [id, omni] : omnimagnets) {
-        int retval = omni.SetCurrent(offVector);
+    for (auto & [id, magnet] : omnimagnets_) {
+        int retval = runCurrent(Eigen::Vector3d::Zero(), magnet);
 
         if (retval < 0) {
             std::cerr << "Magnet " << id << 
@@ -375,31 +494,39 @@ void OmnimagnetDriverNode::shutdown() {
         std::cerr << "Failed to shut down all magnets." << std::endl;
     }
 
-    // Shut down amplifier using inhibitors. Logs failures and continues.
-    auto inhibs = this->get_parameter("hardware.inhibitor.pins").as_integer_array();
-    auto inhbp1 = inhibs.at(0); 
-    auto inhbp2 = inhibs.at(1);
-    auto subdev = this->get_parameter("hardware.subdevice").as_int();
-    auto ground = this->get_parameter("hardware.analog_reference").as_int();
+    // Shut down amplifier inhibitors
+    shutdownInhibs();
 
+    comedi_close(card_);
+    card_ = nullptr;
+}
+
+/**
+ * @brief Sets the inhibitor pins to 0V.
+ * 
+ * @return true if all pins were shut down.
+ */
+bool OmnimagnetDriverNode::shutdownInhibs() {
     bool pinFail = false;
-    int retval = comedi_data_write(D2A, subdev, inhbp1, 0, ground, maxdata1*2./4.);
-    if (retval < 0) {
-        std::cerr << "Failed to shut down D2A Pin " << std::to_string(inhbp1) << std::endl;
-        pinFail = true;
-    }
-    retval = comedi_data_write(D2A, subdev, inhbp2, 0, ground, maxdata2*2./4.);
-    if (retval < 0) {
-        std::cerr << "Failed to shut down D2A Pin " << std::to_string(inhbp2) << std::endl;
-        pinFail = true;
+
+    for (const auto& pin : inhibPins_) {
+        auto zeroVoltage = mapRange<double, lsampl_t>(0.0, minVoltage_, maxVoltage_, minSample_, maxSample_);
+        int retval = comedi_data_write(card_, subDevice_, pin, range_, aref_, zeroVoltage);
+
+        if (retval < 0) {
+            std::cerr << "Failed to shut down enable pin " << std::to_string(pin) << std::endl;
+            pinFail = true;
+        }
     }
 
     if (!pinFail) {
-        std::cout << "Successfully shut down write pins." << std::endl;
+        std::cout << "Successfully shut down power supply enable pins." << std::endl;
     }
     else {
-        std::cerr << "Failed to shut down write pins, use emergency stop!" << std::endl;
+        std::cerr << "Failed to shut down power supply enable pins, use emergency stop!" << std::endl;
     }
+
+    return pinFail;
 }
 
 /*************** TIMER CALLBACKS ***************/
@@ -417,7 +544,7 @@ void OmnimagnetDriverNode::timeoutCallback() {
     msg.error_desc = "System timed out.";
     msg.shutdown = true;
 
-    errorPublisher->publish(msg);
+    errorPublisher_->publish(msg);
 
     rclcpp::shutdown();
 }
@@ -433,26 +560,7 @@ void OmnimagnetDriverNode::timeoutCallback() {
   */
 void OmnimagnetDriverNode::durationCallback() {
     // Delete timer until new order is received
-    durationTimer->cancel();
-
-    // End experiment and reset command count
-    experimentRunning.store(false, std::memory_order_release);
-    activeCommandCount.store(0, std::memory_order_release);
-
-    // Shutdown magnets
-    for (auto& [id, omni] : omnimagnets) {
-        int retval = omni.SetCurrent(offVector);
-        if (retval <= 0) {
-            systemError(
-                this->get_logger(),
-                "Failed to shut down magnet " + std::to_string(id) + ":",
-                "comedi_data_write",
-                errorPublisher,
-                "Failed to shut down magnet" + std::to_string(id) + ".\n",
-                true
-            );
-        }
-    }
+    durationTimer_->cancel();
 
     auto msg = omnimagnet_interfaces::msg::FinishedMessage();
 
@@ -468,10 +576,12 @@ void OmnimagnetDriverNode::durationCallback() {
 
     RCLCPP_INFO(this->get_logger(), "%s", oss.str().c_str());
 
-    finishedPublisher->publish(msg);
+    finishedPublisher_->publish(msg);
+
+    runMode_.store(DriverMode::RESET, std::memory_order_release);
 
     // Reset timeout timer to wait for next command
-    timeoutTimer->reset();
+    timeoutTimer_->reset();
 }
 
 /*************** SERVER CALLBACKS ***************/
@@ -480,8 +590,8 @@ void OmnimagnetDriverNode::durationCallback() {
  * @brief Callback for handling SingleMagnetConstant service requests.
  * 
  * This function is called when a SingleMagnetConstant service request is received.
- * It checks if an experiment is already running, and if so, it logs a warning and returns an error response.
- * If no experiment is running, it cancels the timeout timer and retrieves the request parameters, including the magnet ID, dipole strength, and dipole vector.
+ * If a command is already in progress, it will log a warning and ignor 
+ * It cancels the timeout timer and retrieves the request parameters, including the magnet ID, dipole strength, and dipole vector.
  * It checks if the specified magnet ID is valid, and if not, it logs a warning and returns an error response.
  * It also checks if the dipole vector is valid (non-zero and finite), and if not, it logs a warning and returns an error response.
  * If all checks pass, it sets up the active command for the specified magnet, starts the experiment, and creates a duration timer for the specified duration.
@@ -490,40 +600,42 @@ void OmnimagnetDriverNode::durationCallback() {
 void OmnimagnetDriverNode::smcCallback(
     const omnimagnet_interfaces::srv::SingleMagnetConstant::Request::SharedPtr request,
     const omnimagnet_interfaces::srv::SingleMagnetConstant::Response::SharedPtr response
-    ) 
-{
-    // Check if an experiment is already running
-    if (experimentRunning.load(std::memory_order_acquire)) {
+    ) {
+    // Ignore command if another is currently running
+    if (systemIsBusy()) {
         commandError(
-            this->get_logger(), 
-            "Server tried to start experiment while already in operation.", 
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
             response,
-            "Operation in progress. Please reset before invoking another operation.",
-            timeoutTimer
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
         );
 
         return;
     }
 
     // Cancel the timeout timer to prevent it from triggering during the operation
-    timeoutTimer->cancel();
+    timeoutTimer_->cancel();
 
     auto id = request->omnimagnet;
     auto strength = request->dipole_strength;
     auto vector = request->dipole_vec;
 
+    std::string errorString;
+
     // Check if the specified magnet ID is valid
-    if (omnimagnets.count(id) == 0) {
+    if (!checkID(id, omnimagnets_, errorString)) {
         commandError(
             this->get_logger(),
-            "Omnimagnet " + std::to_string(id) + " not found",
+            errorString,
             response,
-            "Invalid magnet ID: " + std::to_string(id),
-            timeoutTimer
+            errorString,
+            timeoutTimer_
         );
 
         return;
     }
+    auto& magnet = omnimagnets_.at(id);
 
     auto duration = request->duration;
     if (duration <= 0.0) {
@@ -532,53 +644,37 @@ void OmnimagnetDriverNode::smcCallback(
             "Duration is non-positive: " + std::to_string(duration),
             response,
             "Duration is non-positive: " + std::to_string(duration),
-            timeoutTimer
+            timeoutTimer_
         );
         return;
     }
 
-    OmniMagnet& omni = omnimagnets[id];
+    Eigen::Vector3d dipoleVector;
+    dipoleVector << vector.x, vector.y, vector.z;
 
-    Eigen::Vector3d dipole_vector;
-    dipole_vector << vector.x, vector.y, vector.z;
-
-    // Check if the dipole vector is valid (non-zero and finite)
-    if (dipole_vector.norm() < 1e-8) {
+    if (!validVector(dipoleVector, errorString)) {
         commandError(
-            this->get_logger(), 
-            "User attempted to pass zero vector.", 
+            this->get_logger(),
+            errorString,
             response,
-            "Zero rotation vector passed.",
-            timeoutTimer
-        );
-
-        return;
-    }
-    if (!dipole_vector.allFinite()) {
-        commandError(
-            this->get_logger(), 
-            "User attempted to pass NaN.", 
-            response,
-            "NaN component.",
-            timeoutTimer
+            errorString,
+            timeoutTimer_
         );
 
         return;
     }
 
     // Normalize dipole vector to ensure it has a unit length
-    dipole_vector.normalize();
+    dipoleVector.normalize();
+
+    ConstantDipoleCommand command = {&magnet, strength, dipoleVector};
 
     // Set up the active command for the specified magnet using a lock guard to ensure thread safety
     {
-        std::lock_guard<std::mutex> lock(commandMutex);
-        activeCommands[0] = {&omni, 0, strength, 0, makeBasisFromRotationVector(dipole_vector), dipole_vector};
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        activeCommands_.push_back(command);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
-
-    // Start the experiment and set the active command count to 1
-    startTime = std::chrono::steady_clock::now();
-    activeCommandCount.store(1, std::memory_order_release);
-    experimentRunning.store(true, std::memory_order_release);
 
     resetDurationTimer(duration);
 
@@ -602,8 +698,7 @@ void OmnimagnetDriverNode::smcCallback(
  * @brief Callback for handling SingleMagnetRotation service requests.
  * 
  * This function is called when a SingleMagnetRotation service request is received.
- * It checks if an experiment is already running, and if so, it logs a warning and returns an error response.
- * If no experiment is running, it cancels the timeout timer and retrieves the request parameters, including the magnet ID, dipole strength, rotation vector, phase offset, and rotation frequency.
+ * It cancels the timeout timer and retrieves the request parameters, including the magnet ID, dipole strength, rotation vector, phase offset, and rotation frequency.
  * It checks if the specified magnet ID is valid, and if not, it logs a warning and returns an error response.
  * It also checks if the rotation vector is valid (non-zero and finite), and if not, it logs a warning and returns an error response.
  * If all checks pass, it sets up the active command for the specified magnet, starts the experiment, and creates a duration timer for the specified duration.
@@ -613,97 +708,84 @@ void OmnimagnetDriverNode::smrCallback(
     const omnimagnet_interfaces::srv::SingleMagnetRotation::Request::SharedPtr request,
     const omnimagnet_interfaces::srv::SingleMagnetRotation::Response::SharedPtr response
 ) {
-    // Check if an experiment is already running
-    if (experimentRunning.load(std::memory_order_acquire)) {
+    // Ignore command if another is currently running
+    if (systemIsBusy()) {
         commandError(
             this->get_logger(),
-            "Server tried to start experiment while another is in progress.",
+            "Received command while executing previous command. Disregarding.",
             response,
-            "Operation already in progress. Please wait or reset to begin another experiment.",
-            timeoutTimer
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
         );
 
         return;
     }
 
     // Cancel the timeout timer to prevent it from triggering during the operation
-    timeoutTimer->cancel();
+    timeoutTimer_->cancel();
 
     auto id = request->omnimagnet;
     auto strength = request->dipole_strength;
     auto rotationVector = request->rotation_vector;
     auto offset = request->phase_offset;
-    auto phaseOffset = offset * M_PI / 180.0;
+    auto phaseOffset = offset * M_PI / 180.0; // Converted to radians
     auto freq = request->rotation_freq;
+    auto duration = request->duration;
+    
+    std::string errorString;
 
     // Check if the specified magnet ID is valid
-    if (omnimagnets.count(id) == 0) {
+    if (!checkID(id, omnimagnets_, errorString)) {
         commandError(
             this->get_logger(),
-            "Omnimagnet " + std::to_string(id) + " not found.",
+            errorString,
             response,
-            "Invalid magnet ID: " + std::to_string(id),
-            timeoutTimer
+            errorString,
+            timeoutTimer_
         );
 
         return;
     }
+    auto& magnet = omnimagnets_.at(id);
 
-    // Optional argument
-    auto duration = request->duration;
+    // Check if duration is positive
     if (duration <= 0.0) {
         commandError(
             this->get_logger(),
             "Duration is non-positive: " + std::to_string(duration),
             response,
             "Duration is non-positive: " + std::to_string(duration),
-            timeoutTimer
+            timeoutTimer_
         );
         return;
     }
-
-    auto omni = &omnimagnets[id];
     
     Eigen::Vector3d rotVec;
     rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
 
-    // Check if the rotation vector is valid (non-zero and finite)
-    if (rotVec.norm() < 1e-8) {
+    if (!validVector(rotVec, errorString)) {
         commandError(
-            this->get_logger(), 
-            "User attempted to pass zero vector.", 
+            this->get_logger(),
+            errorString,
             response,
-            "Zero rotation vector passed.",
-            timeoutTimer
-        );
-
-        return;
-    }
-    if (!rotVec.allFinite()) {
-        commandError(
-            this->get_logger(), 
-            "User attempted to pass NaN.", 
-            response,
-            "NaN component.",
-            timeoutTimer
+            errorString,
+            timeoutTimer_
         );
 
         return;
     }
 
-    // Normalize rotation vector to ensure it has a unit length
-    rotVec.normalize();
+    Basis rotationPlane = makeBasisFromRotationVector(rotVec);
+    RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
 
     // Set up the active command for the specified magnet using a lock guard to ensure thread safety
     {
-        std::lock_guard<std::mutex> lock (commandMutex);
-        activeCommands[0] = {omni, freq, strength, phaseOffset, makeBasisFromRotationVector(rotVec), rotVec};
+        std::lock_guard<std::mutex> lock (commandMutex_);
+        activeCommands_.push_back(command);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
     }
 
-    // Start the experiment and set the active command count to 1
-    startTime = std::chrono::steady_clock::now();
-    activeCommandCount.store(1, std::memory_order_release);
-    experimentRunning.store(true, std::memory_order_release);
+    resetDurationTimer(duration);
 
     RCLCPP_INFO(this->get_logger(), 
         "Beginning Operation\n"
@@ -715,7 +797,7 @@ void OmnimagnetDriverNode::smrCallback(
 
     RCLCPP_INFO(this->get_logger(), 
         "Magnet: %lu\n"
-        "Dipole: <%.3f, %.3f, %.3f>\n"
+        "Rotation: <%.3f, %.3f, %.3f>\n"
         "Strength: %.2f\n"
         "Frequency: %.2f\n"
         "Offset: %.2f\n",
@@ -727,8 +809,7 @@ void OmnimagnetDriverNode::smrCallback(
  * @brief Callback for handling MultiMagnetConstant service requests.
  * 
  * This function is called when a MultiMagnetConstant service request is received.
- * It checks if an experiment is already running, and if so, it logs a warning and returns an error response.
- * If no experiment is running, it cancels the timeout timer and retrieves the request parameters, including the magnet IDs, dipole strengths, and dipole vectors.
+ * It cancels the timeout timer and retrieves the request parameters, including the magnet IDs, dipole strengths, and dipole vectors.
  * It checks for size mismatches in the request parameters and validates each magnet ID.
  * It also checks if the dipole vectors are valid (non-zero and finite), and if not, it logs a warning and returns an error response.
  * If all checks pass, it sets up the active commands for the specified magnets, starts the experiment, and creates a duration timer for the specified duration.
@@ -737,83 +818,59 @@ void OmnimagnetDriverNode::smrCallback(
 void OmnimagnetDriverNode::mmcCallback(
     const omnimagnet_interfaces::srv::MultiMagnetConstant::Request::SharedPtr request,
     const omnimagnet_interfaces::srv::MultiMagnetConstant::Response::SharedPtr response
-)
-{
-    // Check if an experiment is already running
-    if (experimentRunning.load(std::memory_order_acquire)) {
+) {
+    // Ignore command if another is currently running
+    if (systemIsBusy()) {
         commandError(
-            this->get_logger(), 
-            "Server tried to start experiment while already in operation.", 
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
             response,
-            "Operation in progress. Please reset before invoking another operation.",
-            timeoutTimer
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
         );
 
         return;
     }
 
     // Cancel the timeout timer to prevent it from triggering during the operation
-    timeoutTimer->cancel();
+    timeoutTimer_->cancel();
     
     auto ids = request->omnimagnets;
     auto strengths = request->dipole_strengths;
     auto vectors = request->dipole_vecs;
 
-    // Check for size mismatches
-    if (ids.size() < 1) {
-        commandError(
-            this->get_logger(), 
-            "No omnimagnets selected.", 
-            response,
-            "No omnimagnets selected.",
-            timeoutTimer
-        );
-    }
-    if (ids.size() > maxMagnets) {
-        commandError(
-            this->get_logger(), 
-            "Too many magnets selected.", 
-            response,
-            "Too many magnets selected.",
-            timeoutTimer
-        );
-    }
-    if (strengths.size() != 1 && strengths.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Strength size mismatch.", 
-            response,
-            "Dipole strengths list size mismatch.",
-            timeoutTimer
-        );
-
-        return;
-    }
-    if (vectors.size() != 1 && vectors.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Vector size mismatch.", 
-            response,
-            "Dipole vectors list size mismatch.",
-            timeoutTimer
-        );
-
-        return;
-    }
-
-    for (auto& id : ids) {
-        if (omnimagnets.count(id) == 0) {
-            commandError(
-                this->get_logger(), 
-                "Omnimagnet not found.", 
-                response,
-                "Invalid magnet ID: " + std::to_string(id),
-                timeoutTimer
-            );
     
-            timeoutTimer->reset();
-            return;
-        }
+    std::vector<ActiveMagnetCommand> commandList;
+    
+    std::string errorString;
+    
+    if (!checkIDs(ids, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+        
+        return;
+    }
+    
+    if (!checkMultipleVectors(
+        ids,
+        errorString,
+        strengths,
+        vectors
+    )) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
     }
 
     // Optional argument
@@ -824,8 +881,9 @@ void OmnimagnetDriverNode::mmcCallback(
             "Duration is non-positive: " + std::to_string(duration),
             response,
             "Duration is non-positive: " + std::to_string(duration),
-            timeoutTimer
+            timeoutTimer_
         );
+
         return;
     }
 
@@ -846,47 +904,33 @@ void OmnimagnetDriverNode::mmcCallback(
         id = ids[i];
 
         // If only one vector is provided, use it for all magnets; otherwise, use the corresponding vector for each magnet
-        if (vectors.size() == 1)
-            vector = vectors[0];
-        else
-            vector = vectors[i];
+        vector = (vectors.size() == 1)
+            ? vectors[0]
+            : vectors[i];
 
-        if (strengths.size() == 1)
-            strength = strengths[0];
-        else
-            strength = strengths[i];
+        strength = (strengths.size() == 1)
+            ? strengths[0]
+            : strengths[i];
 
-        auto& omni = omnimagnets[id];
+        auto& magnet = omnimagnets_.at(id);
         
-        Eigen::Vector3d dipole_vector;
-        dipole_vector << vector.x, vector.y, vector.z;
+        Eigen::Vector3d dipoleVector;
+        dipoleVector << vector.x, vector.y, vector.z;
 
-        // Check if the dipole vector is valid (non-zero and finite)
-        if (dipole_vector.norm() < 1e-8) {
+        if (!validVector(dipoleVector, errorString)) {
             commandError(
-                this->get_logger(), 
-                "User attempted to pass zero vector.", 
+                this->get_logger(),
+                errorString,
                 response,
-                "Zero rotation vector passed.",
-                timeoutTimer
-            );
-
-            return;
-        }
-        if (!dipole_vector.allFinite()) {
-            commandError(
-                this->get_logger(), 
-                "User attempted to pass NaN.", 
-                response,
-                "NaN component.",
-                timeoutTimer
+                errorString,
+                timeoutTimer_
             );
 
             return;
         }
 
         // Normalize dipole vector to ensure it has a unit length
-        dipole_vector.normalize();
+        dipoleVector.normalize();
 
         logString 
             << "Magnet: " << id << std::endl
@@ -896,29 +940,29 @@ void OmnimagnetDriverNode::mmcCallback(
                 << vector.z << ">" << std::endl
             << "Strength: " << strength << std::endl;
 
-        // Set up the active command for the specified magnet using a lock guard to ensure thread safety
-        {
-            std::lock_guard<std::mutex> lock(commandMutex);
-            activeCommands[i] = {&omni, 0, strength, 0, makeBasisFromRotationVector(dipole_vector), dipole_vector};
-        }
+        ConstantDipoleCommand command = {&magnet, strength, dipoleVector};
+
+        // Add command to the temporary command list
+        commandList.push_back(command);
     }
 
-    RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
-
-    // Start the experiment and set the active command count to the number of magnets
-    startTime = std::chrono::steady_clock::now();
-    activeCommandCount.store(ids.size(), std::memory_order_release);
-    experimentRunning.store(true, std::memory_order_release);
+    // Store commands for control thread
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        activeCommands_ = std::move(commandList);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
+    }
 
     resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
 }
 
 /**
  * @brief Callback for handling MultiMagnetRotation service requests.
  * 
  * This function is called when a MultiMagnetRotation service request is received.
- * It checks if an experiment is already running, and if so, it logs a warning and returns an error response.
- * If no experiment is running, it cancels the timeout timer and retrieves the request parameters, including the magnet IDs, dipole strengths, rotation vectors, phase offsets, and rotation frequencies.
+ * It cancels the timeout timer and retrieves the request parameters, including the magnet IDs, dipole strengths, rotation vectors, phase offsets, and rotation frequencies.
  * It checks for size mismatches in the request parameters and validates each magnet ID.
  * It also checks if the rotation vectors are valid (non-zero and finite), and if not, it logs a warning and returns an error response.
  * If all checks pass, it sets up the active commands for the specified magnets, starts the experiment, and creates a duration timer for the specified duration.
@@ -928,119 +972,71 @@ void OmnimagnetDriverNode::mmrCallback(
     const omnimagnet_interfaces::srv::MultiMagnetRotation::Request::SharedPtr request,
     const omnimagnet_interfaces::srv::MultiMagnetRotation::Response::SharedPtr response
 ) {
-    // Check if an experiment is already running
-    if (experimentRunning.load(std::memory_order_acquire)) {
+    // Ignore command if another is currently running
+    if (systemIsBusy()) {
         commandError(
-            this->get_logger(), 
-            "Server tried to start experiment while already in operation.", 
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
             response,
-            "Operation in progress. Please reset before invoking another operation.",
-            timeoutTimer
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
         );
 
         return;
     }
-
+    
     // Cancel the timeout timer to prevent it from triggering during the operation
-    timeoutTimer->cancel();
+    timeoutTimer_->cancel();
 
     auto ids = request->omnimagnets;
     auto rotationVectors = request->rotation_vectors;
     auto freqs = request->rotation_freqs;
     auto strengths = request->dipole_strengths;
     auto offsets = request->phase_offsets;
-
-    // Check for size mismatches
-    if (ids.size() < 1) {
-        commandError(
-            this->get_logger(), 
-            "No omnimagnets selected.", 
-            response,
-            "No omnimagnets selected.",
-            timeoutTimer
-        );
-
-        return;
-    }
-    if (ids.size() > maxMagnets) {
-        commandError(
-            this->get_logger(), 
-            "Too many magnets selected.", 
-            response,
-            "Too many magnets selected.",
-            timeoutTimer
-        );
-
-        return;
-    }
-    if (strengths.size() != 1 && strengths.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Strength size mismatch.", 
-            response,
-            "Dipole strengths list size mismatch.",
-            timeoutTimer
-        );
-
-        return;
-    }
-    if (freqs.size() != 1 && freqs.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Frequency size mismatch.", 
-            response,
-            "Frequency list size mismatch.",
-            timeoutTimer
-        );
-
-        return;
-    }
-    if (offsets.size() != 1 && offsets.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Offset size mismatch.", 
-            response,
-            "Offset list size mismatch.",
-            timeoutTimer
-        );
-
-        return;
-    }
-    if (rotationVectors.size() != 1 && rotationVectors.size() != ids.size()) {
-        commandError(
-            this->get_logger(), 
-            "Rotation vectors size mismatch.", 
-            response,
-            "Rotation vectors list size mismatch.",
-            timeoutTimer
-        );
-
-        return;
-    }
-
-    for (auto& id : ids) {
-        if (omnimagnets.count(id) == 0) {
-            commandError(
-                this->get_logger(), 
-                "Omnimagnet not found.", 
-                response,
-                "Invalid magnet ID: " + std::to_string(id),
-                timeoutTimer
-            );
-
-            return;
-        }
-    }
-
-    // Optional duration argument
     auto duration = request->duration;
+
+    std::vector<ActiveMagnetCommand> commandList;
+
+    std::string errorString;
+
+    if (!checkIDs(ids, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    if (!checkMultipleVectors(
+        ids,
+        errorString,
+        rotationVectors,
+        freqs,
+        strengths,
+        offsets    
+    )) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
     if (duration <= 0.0) {
         commandError(
             this->get_logger(),
             "Duration is non-positive: " + std::to_string(duration),
             response,
             "Duration is non-positive: " + std::to_string(duration),
-            timeoutTimer
+            timeoutTimer_
         );
         return;
     }
@@ -1063,54 +1059,39 @@ void OmnimagnetDriverNode::mmrCallback(
 
         id = ids[i];
 
-        // If only one rotation vector is provided, use it for all magnets; otherwise, use the corresponding rotation vector for each magnet
-        if (rotationVectors.size() == 1)
-            rotationVector = rotationVectors[0];
-        else
-            rotationVector = rotationVectors[i];
+        // For each list, if only one entry is provided, apply it to all, otherwise use corresponding entry
+        rotationVector = (rotationVectors.size() == 1)
+            ? rotationVectors[0]
+            : rotationVectors[i];
 
-        if (strengths.size() == 1)
-            strength = strengths[0];
-        else
-            strength = strengths[i];
-            
-        if (freqs.size() == 1)
-            freq = freqs[0];
-        else
-            freq = freqs[i];
+        strength = (strengths.size() == 1)
+            ? strengths[0]
+            : strengths[i];
 
-        if (offsets.size() == 1)
-            offset = offsets[0];
-        else
-            offset = offsets[i];
+        freq = (freqs.size() == 1)
+            ? freqs[0]
+            : freqs[i];
+
+        offset = (offsets.size() == 1)
+            ? offsets[0]
+            : offsets[i];
 
         // Convert to radians
         auto phaseOffset = offset * M_PI / 180.0;
 
-        auto omni = &omnimagnets[id];
+        auto& magnet = omnimagnets_.at(id);
         
+        // Convert vector to Eigen Vector3d
         Eigen::Vector3d rotVec;
         rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
 
-        // Check if the rotation vector is valid (non-zero and finite)
-        if (rotVec.norm() < 1e-8) {
+        if (!validVector(rotVec, errorString)) {
             commandError(
                 this->get_logger(),
-                "Zero rotation vector.",
+                errorString,
                 response,
-                "Zero rotation vector passed.",
-                timeoutTimer
-            );
-
-            return;
-        }
-        if (!rotVec.allFinite()) {
-            commandError(
-                this->get_logger(),
-                "Invalid rotation vector.",
-                response,
-                "NaN component in rotation vector.",
-                timeoutTimer
+                errorString,
+                timeoutTimer_
             );
 
             return;
@@ -1118,16 +1099,17 @@ void OmnimagnetDriverNode::mmrCallback(
 
         // Normalize rotation vector to ensure it has a unit length
         rotVec.normalize();
-        
-        // Set up the active command for the specified magnet using a lock guard to ensure thread safety
-        {
-            std::lock_guard<std::mutex> lock (commandMutex);
-            activeCommands[i] = {omni, freq, strength, phaseOffset, makeBasisFromRotationVector(rotVec), rotVec};
-        }
+
+        Basis rotationPlane = makeBasisFromRotationVector(rotVec);
+        RotatingDipoleCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
+
+        // Add to temporary command list
+        commandList.push_back(command);
+    
 
         logString
             << "Magnet: " << id << std::endl
-            << "Dipole: <"
+            << "Rotation: <"
                 << rotationVector.x << ", "
                 << rotationVector.y << ", "
                 << rotationVector.z << ">" << std::endl
@@ -1136,15 +1118,530 @@ void OmnimagnetDriverNode::mmrCallback(
             << "Offset: " << offset << std::endl;
     }
 
-    RCLCPP_INFO(this->get_logger(), logString.str().c_str());
-
-    // Start the experiment and set the active command count to the number of magnets
-    startTime = std::chrono::steady_clock::now();
-    activeCommandCount.store(ids.size(), std::memory_order_release);
-    experimentRunning.store(true, std::memory_order_release);
+    // Send command list to control thread
+    {
+        std::lock_guard<std::mutex> lock (commandMutex_);
+        activeCommands_ = std::move(commandList);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
+    }
 
     resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
 }
+
+/**
+ * @brief Callback for Ros2 single current constant service.
+ */
+void OmnimagnetDriverNode::sccCallback(
+    const omnimagnet_interfaces::srv::SingleCurrentConstant::Request::SharedPtr request,
+    const omnimagnet_interfaces::srv::SingleCurrentConstant::Response::SharedPtr response
+) {
+    // Ignore command if another is currently running
+    if (systemIsBusy()) {
+        commandError(
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
+            response,
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    // Cancel the timeout timer to prevent it from triggering during the operation
+    timeoutTimer_->cancel();
+
+    auto id = request->omnimagnet;
+    auto strength = request->current_strength;
+    auto vector = request->current_vec;
+
+    std::string errorString;
+
+    // Check if the specified magnet ID is valid
+    if (!checkID(id, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+    auto& magnet = omnimagnets_.at(id);
+
+    auto duration = request->duration;
+    if (duration <= 0.0) {
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer_
+        );
+        return;
+    }
+
+    Eigen::Vector3d currentVector;
+    currentVector << vector.x, vector.y, vector.z;
+
+    if (!validVector(currentVector, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    currentVector.normalize();
+    ConstantCurrentCommand command = {&magnet, strength, currentVector};
+
+    // Set up the active command for the specified magnet using a lock guard to ensure thread safety
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        activeCommands_.push_back(command);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
+    }
+
+    resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), 
+        "Beginning Operation\n"
+        "Single Magnet\n"
+        "Mode: Constant Current\n"
+        "Duration %.3f s\n",
+        duration
+    );
+
+    RCLCPP_INFO(this->get_logger(), 
+        "Magnet: %lu\n"
+        "Current: <%.3f, %.3f, %.3f>\n"
+        "Strength: %.2f",
+        id, vector.x, vector.y, vector.z, strength
+    );
+}
+
+/**
+ * @brief Callback for Ros2 single current rotation service.
+ */
+void OmnimagnetDriverNode::scrCallback(
+    const omnimagnet_interfaces::srv::SingleCurrentRotation::Request::SharedPtr request,
+    const omnimagnet_interfaces::srv::SingleCurrentRotation::Response::SharedPtr response
+) {
+    // Ignore command if another is currently running
+    if (systemIsBusy()) {
+        commandError(
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
+            response,
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    // Cancel the timeout timer to prevent it from triggering during the operation
+    timeoutTimer_->cancel();
+
+    auto id = request->omnimagnet;
+    auto strength = request->current_strength;
+    auto rotationVector = request->rotation_vector;
+    auto offset = request->phase_offset;
+    auto phaseOffset = offset * M_PI / 180.0; // Converted to radians
+    auto freq = request->rotation_freq;
+    auto duration = request->duration;
+    
+    std::string errorString;
+
+    // Check if the specified magnet ID is valid
+    if (!checkID(id, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+    auto& magnet = omnimagnets_.at(id);
+
+    // Check if duration is positive
+    if (duration <= 0.0) {
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer_
+        );
+        return;
+    }
+    
+    Eigen::Vector3d rotVec;
+    rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
+
+    if (!validVector(rotVec, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    Basis rotationPlane = makeBasisFromRotationVector(rotVec);
+    RotatingCurrentCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
+
+    // Set up the active command for the specified magnet using a lock guard to ensure thread safety
+    {
+        std::lock_guard<std::mutex> lock (commandMutex_);
+        activeCommands_.push_back(command);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
+    }
+
+    resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), 
+        "Beginning Operation\n"
+        "Single Magnet\n"
+        "Mode: Rotating Current\n"
+        "Duration %.3f s\n",
+        duration
+    );
+
+    RCLCPP_INFO(this->get_logger(), 
+        "Magnet: %lu\n"
+        "Rotation: <%.3f, %.3f, %.3f>\n"
+        "Strength: %.2f\n"
+        "Frequency: %.2f\n"
+        "Offset: %.2f\n",
+        id, rotationVector.x, rotationVector.y, rotationVector.z, strength, freq, offset
+    );
+}
+
+/**
+ * @brief Callback for Ros2 Multi-current constant service.
+ */
+void OmnimagnetDriverNode::mccCallback(
+    const omnimagnet_interfaces::srv::MultiCurrentConstant::Request::SharedPtr request,
+    const omnimagnet_interfaces::srv::MultiCurrentConstant::Response::SharedPtr response
+) {
+    // Ignore command if another is currently running
+    if (systemIsBusy()) {
+        commandError(
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
+            response,
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    // Cancel the timeout timer to prevent it from triggering during the operation
+    timeoutTimer_->cancel();
+    
+    auto ids = request->omnimagnets;
+    auto strengths = request->current_strengths;
+    auto vectors = request->current_vecs;
+
+    
+    std::vector<ActiveMagnetCommand> commandList;
+    
+    std::string errorString;
+    
+    if (!checkIDs(ids, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+        
+        return;
+    }
+    
+    if (!checkMultipleVectors(
+        ids,
+        errorString,
+        strengths,
+        vectors
+    )) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    auto duration = request->duration;
+    if (duration <= 0.0) {
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    std::stringstream logString;
+
+    logString 
+        << "Beginning Operation" << std::endl
+        << "Multiple Magnets" << std::endl
+        << "Mode: Constant Current" << std::endl
+        << "Duration: " << duration << " s" << std::endl;
+
+    // Set up active commands for each magnet
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        uint64_t id;
+        omnimagnet_interfaces::msg::Vector3 vector;
+        double strength;
+
+        id = ids[i];
+
+        // If only one vector is provided, use it for all magnets; otherwise, use the corresponding vector for each magnet
+        vector = (vectors.size() == 1)
+            ? vectors[0]
+            : vectors[i];
+
+        strength = (strengths.size() == 1)
+            ? strengths[0]
+            : strengths[i];
+
+        auto& magnet = omnimagnets_.at(id);
+        
+        Eigen::Vector3d currentVector;
+        currentVector << vector.x, vector.y, vector.z;
+
+        if (!validVector(currentVector, errorString)) {
+            commandError(
+                this->get_logger(),
+                errorString,
+                response,
+                errorString,
+                timeoutTimer_
+            );
+
+            return;
+        }
+
+        // Normalize dipole vector to ensure it has a unit length
+        currentVector.normalize();
+
+        logString 
+            << "Magnet: " << id << std::endl
+            << "Current: <"
+                << vector.x << ", "
+                << vector.y << ", "
+                << vector.z << ">" << std::endl
+            << "Strength: " << strength << std::endl;
+
+        ConstantCurrentCommand command = {&magnet, strength, currentVector};
+
+        // Add command to the temporary command list
+        commandList.push_back(command);
+    }
+
+    // Store commands for control thread
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        activeCommands_ = std::move(commandList);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
+    }
+
+    resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
+}
+
+/**
+ * @brief Callback for Ros2 Multi-current rotation service
+ */
+void OmnimagnetDriverNode::mcrCallback(
+    const omnimagnet_interfaces::srv::MultiCurrentRotation::Request::SharedPtr request,
+    const omnimagnet_interfaces::srv::MultiCurrentRotation::Response::SharedPtr response
+) {
+    // Ignore command if another is currently running
+    if (systemIsBusy()) {
+        commandError(
+            this->get_logger(),
+            "Received command while executing previous command. Disregarding.",
+            response,
+            "Command sent while another is being executed. New command ignored.",
+            timeoutTimer_
+        );
+
+        return;
+    }
+    
+    // Cancel the timeout timer to prevent it from triggering during the operation
+    timeoutTimer_->cancel();
+
+    auto ids = request->omnimagnets;
+    auto rotationVectors = request->rotation_vectors;
+    auto freqs = request->rotation_freqs;
+    auto strengths = request->current_strengths;
+    auto offsets = request->phase_offsets;
+    auto duration = request->duration;
+
+    std::vector<ActiveMagnetCommand> commandList;
+
+    std::string errorString;
+
+    if (!checkIDs(ids, omnimagnets_, errorString)) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    if (!checkMultipleVectors(
+        ids,
+        errorString,
+        rotationVectors,
+        freqs,
+        strengths,
+        offsets    
+    )) {
+        commandError(
+            this->get_logger(),
+            errorString,
+            response,
+            errorString,
+            timeoutTimer_
+        );
+
+        return;
+    }
+
+    if (duration <= 0.0) {
+        commandError(
+            this->get_logger(),
+            "Duration is non-positive: " + std::to_string(duration),
+            response,
+            "Duration is non-positive: " + std::to_string(duration),
+            timeoutTimer_
+        );
+        return;
+    }
+
+    std::stringstream logString;
+
+    logString 
+        << "Beginning Operation" << std::endl
+        << "Multiple Magnets" << std::endl
+        << "Mode: Rotating Current" << std::endl
+        << "Duration: " << duration << " s" << std::endl;
+
+    // Set up active commands for each magnet
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        uint64_t id;
+        omnimagnet_interfaces::msg::Vector3 rotationVector;
+        double strength;
+        double offset;
+        double freq;
+
+        id = ids[i];
+
+        // For each list, if only one entry is provided, apply it to all, otherwise use corresponding entry
+        rotationVector = (rotationVectors.size() == 1)
+            ? rotationVectors[0]
+            : rotationVectors[i];
+
+        strength = (strengths.size() == 1)
+            ? strengths[0]
+            : strengths[i];
+
+        freq = (freqs.size() == 1)
+            ? freqs[0]
+            : freqs[i];
+
+        offset = (offsets.size() == 1)
+            ? offsets[0]
+            : offsets[i];
+
+        // Convert to radians
+        auto phaseOffset = offset * M_PI / 180.0;
+
+        auto& magnet = omnimagnets_.at(id);
+        
+        // Convert vector to Eigen Vector3d
+        Eigen::Vector3d rotVec;
+        rotVec << rotationVector.x, rotationVector.y, rotationVector.z;
+
+        if (!validVector(rotVec, errorString)) {
+            commandError(
+                this->get_logger(),
+                errorString,
+                response,
+                errorString,
+                timeoutTimer_
+            );
+
+            return;
+        }
+
+        // Normalize rotation vector to ensure it has a unit length
+        rotVec.normalize();
+
+        Basis rotationPlane = makeBasisFromRotationVector(rotVec);
+        RotatingCurrentCommand command = {&magnet, freq, strength, phaseOffset, rotationPlane};
+
+        // Add to temporary command list
+        commandList.push_back(command);
+    
+
+        logString
+            << "Magnet: " << id << std::endl
+            << "Rotation: <"
+                << rotationVector.x << ", "
+                << rotationVector.y << ", "
+                << rotationVector.z << ">" << std::endl
+            << "Strength: " << strength << std::endl
+            << "Frequency: " << freq << std::endl
+            << "Offset: " << offset << std::endl;
+    }
+
+    // Send command list to control thread
+    {
+        std::lock_guard<std::mutex> lock (commandMutex_);
+        activeCommands_ = std::move(commandList);
+        runMode_.store(DriverMode::NEW_COMMAND, std::memory_order_release);
+    }
+
+    resetDurationTimer(duration);
+
+    RCLCPP_INFO(this->get_logger(), "%s", logString.str().c_str());
+}
+
 
 /**
  * @brief Callback for handling DriverReset service requests.
@@ -1158,33 +1655,17 @@ void OmnimagnetDriverNode::resetCallback(
     [[maybe_unused]] const omnimagnet_interfaces::srv::DriverReset::Request::SharedPtr request,
     const omnimagnet_interfaces::srv::DriverReset::Response::SharedPtr response
 ) {
-    // Stop any ongoing experiment and reset the active command count
-    experimentRunning.store(false, std::memory_order_release);
-    activeCommandCount.store(0, std::memory_order_release);
-
     // Cancel the duration timer if it exists
-    if (durationTimer) {
-        durationTimer->cancel();
+    if (durationTimer_) {
+        durationTimer_->cancel();
     }
 
     RCLCPP_INFO(this->get_logger(), "System reset by command.");
 
-    // Turn off all magnets and check for failures
-    for (auto & [id, magnet] : omnimagnets) {
-        if (magnet.SetCurrent(offVector) < 1) {
-            systemError(
-                this->get_logger(),
-                "Failed to shut down magnet " + std::to_string(id),
-                "comedi_data_write",
-                errorPublisher,
-                "Failed to turn off magnet " + std::to_string(id),
-                true
-            );
-        } 
-    }
+    runMode_.store(DriverMode::RESET, std::memory_order_release);
 
     // Reset the timeout timer to wait for the next command
-    timeoutTimer->reset();
+    timeoutTimer_->reset();
 
     response->status = true;
 }
@@ -1204,58 +1685,119 @@ void OmnimagnetDriverNode::controlLoop() {
     // Get the control frequency from the parameters and calculate the control period
     double control_hz = this->get_parameter(
         "timing.control_frequency_hz").as_double();
-    auto period = std::chrono::duration<double>(1. / control_hz);
 
-    auto next = clock::now();
+    const auto period =
+        std::chrono::duration_cast<clock::duration>(
+            std::chrono::duration<double>(1. / control_hz)
+        );
+
+    auto startTime = clock::now();
+    double dt;
+
+    std::vector<ActiveMagnetCommand> localCommands;
+
+    auto next = clock::now() + period;
 
     // Main control loop that runs while the control thread is active
-    while (controlThreadRunning.load(std::memory_order_acquire)) {
-        auto now = clock::now();
-
-        // Ensure that the next control cycle is in the future, adjusting if necessary
-        while (next <= now) {
-            next += std::chrono::duration_cast<clock::duration>(period);
-        }
-        
-        // If an experiment is running, update the currents of the active magnets based on their respective commands
-        if (experimentRunning.load(std::memory_order_acquire)) {
-            // Calculate the elapsed time since the start of the experiment
-            double t = std::chrono::duration<double>(now - startTime).count();
-
-            // Copy the active commands to a local array to avoid holding the lock while updating currents
-            std::array<ActiveMagnetCommand, maxMagnets> localCommands;
-
-            // Get the current count of active commands using relaxed memory order
-            size_t localCount = activeCommandCount.load(std::memory_order_relaxed);
-
-            // Copy the active commands to the local array while holding the lock to ensure thread safety
-            {
-                std::lock_guard<std::mutex> lock(commandMutex);
-                std::copy_n(activeCommands.begin(), localCount, localCommands.begin());
-            }
+    while (true) {
+        switch (runMode_.load(std::memory_order_acquire)) {
+            case DriverMode::RESET:
+                resetCommands(localCommands);
+                break;
             
-            // Update the currents of the active magnets based on their respective commands (constant or rotating dipoles)
-            for (size_t i = 0; i < localCount; ++i) {
-                const auto& command = localCommands[i];
+            case DriverMode::NEW_COMMAND:
+                startTime = clock::now();
+                loadNewCommands(localCommands);
+                break;
 
-                // Constant dipole command (frequency = 0) or rotating dipole command (frequency > 0)
-                if (command.freq == 0){
-                    command.omni->SetCurrent(command.omni->Dipole2Current(command.strength * command.vector));
-                }
-                else {
-                    // Calculate the angle theta based on the frequency, elapsed time, and phase offset
-                    double theta = 2.0 * M_PI * command.freq * t + command.offset;
-                    Eigen::Vector3d dipole = command.strength * 
-                        (std::cos(theta) * command.basis.u() +
-                         std::sin(theta) * command.basis.v());
-    
-                    command.omni->SetCurrent(command.omni->Dipole2Current(dipole));
-                }
-            }
+            case DriverMode::RUNNING:
+                dt = std::chrono::duration<double>(clock::now() - startTime).count();
+                runCommands(localCommands, dt);
+                break;
+
+            case DriverMode::OFF:
+                return;
+
+            case DriverMode::IDLE:
+            default:
+                break;
         }
 
         // Sleep until the next control cycle to maintain the desired control frequency
-        std::this_thread::sleep_until(next);
+        auto now = clock::now();
+
+        if (next < now) {
+            next = now + period;
+        }
+        else {
+            std::this_thread::sleep_until(next);
+            next += period;
+        }
+    }
+}
+
+/**
+ * @brief Resets the control thread, clearing the local commands and setting the thread to IDLE.
+ */
+void OmnimagnetDriverNode::resetCommands(std::vector<ActiveMagnetCommand>& commands) {       
+    for (const auto& command : commands) {
+        const auto* magnet = commandMagnet(command);
+        
+        if (runCurrent(Eigen::Vector3d::Zero(), *magnet) < 0) {
+            systemError(
+                this->get_logger(),
+                "Failed to shut down magnet " + std::to_string(magnet->ID()) + ". Shutting down.",
+                "comedi_data_write",
+                errorPublisher_,
+                "Failed to shut down magnet " + std::to_string(magnet->ID()) + ". Shutting down.",
+                true
+            );
+        }
+    }
+    
+    commands.clear();
+    runMode_.store(DriverMode::IDLE, std::memory_order_release);
+}
+
+/**
+ * @brief Loads a new command set into local and sets the driver to RUNNING.
+ */
+void OmnimagnetDriverNode::loadNewCommands(std::vector<ActiveMagnetCommand>& commands) {
+    // Copy commands to local environment
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        commands = std::move(activeCommands_);
+        activeCommands_.clear();
+    }
+
+    runMode_.store(DriverMode::RUNNING, std::memory_order_release);
+}
+
+/**
+ * @brief Runs the command set with the given delta-time. Sends and error and resets if a magnet fails to write.
+ */
+void OmnimagnetDriverNode::runCommands(
+    std::vector<ActiveMagnetCommand>& commands,
+    double dt
+) {
+    // Update the currents of the active magnets based on their respective commands (constant or rotating dipoles)
+    for (const auto& command : commands) {
+        const auto current = currentAtTime(command, dt);
+        const auto* magnet = commandMagnet(command);
+
+        if (runCurrent(current, *magnet) < 0) {
+            systemError(
+                this->get_logger(),
+                "Failed to write current to magnet " + std::to_string(magnet->ID()),
+                "comedi_data_write",
+                errorPublisher_,
+                "Failed to write current to magnet " + std::to_string(magnet->ID()) + ". Shutting down.",
+                true
+            );
+
+            runMode_.store(DriverMode::RESET, std::memory_order_release);
+            return;
+        }
     }
 }
 
@@ -1266,7 +1808,7 @@ void OmnimagnetDriverNode::controlLoop() {
  * This function declares various parameters for the OmnimagnetDriverNode, including hardware settings, timing configurations, and default parameters for each magnet (1-6).
  * It uses the declare_parameter method to declare parameters with their default values.
  * The parameters include hardware device, subdevice, channel, range, analog reference, inhibitor settings, 
- * timing timeout, default duration, control frequency, 
+ * timing timeout, control frequency, 
  * and magnet-specific parameters such as ID, enabled status, wire width, wire lengths, core size, channels, 
  * estimation method, and frame.
  * The function also calls the declareMagnetParameters helper function to declare parameters for each magnet with default channels.
@@ -1288,14 +1830,31 @@ void OmnimagnetDriverNode::declareParameters() {
     this->declare_parameter<int>(
         "hardware.analog_reference", 0
     );
-    this->declare_parameter<int>(
-        "hardware.inhibitor.enabled", false
-    );
     this->declare_parameter<std::vector<int>>(
         "hardware.inhibitor.pins", {25, 26}
     );
     this->declare_parameter<double>(
-        "hardware.inhibitor.percent", .75
+        "hardware.inhibitor.voltage", 5.0
+    );
+
+    // Ranges
+    this->declare_parameter<int>(
+        "hardware.min_sample", 0
+    );
+    this->declare_parameter<int>(
+        "hardware.max_sample", 16383
+    );
+    this->declare_parameter<double>(
+        "hardware.min_voltage", -10.0
+    );
+    this->declare_parameter<double>(
+        "hardware.max_voltage", 10.0
+    );
+    this->declare_parameter<double>(
+        "hardware.min_current", -15.0
+    );
+    this->declare_parameter<double>(
+        "hardware.max_current", 15.0
     );
 
     // Timing
@@ -1303,14 +1862,11 @@ void OmnimagnetDriverNode::declareParameters() {
         "timing.timeout_seconds", 300.
     );
     this->declare_parameter<double>(
-        "timing.default_duration_seconds", 30.0
-    );
-    this->declare_parameter<double>(
         "timing.control_frequency_hz", 1000.
     );
 
     // Default channels for magnets 1-6
-    constexpr std::array<std::array<int, 3>, maxMagnets> default_channels{{
+    constexpr std::array<std::array<int, 3>, maxMagnets_> default_channels{{
         {{2, 0, 18}},
         {{3, 11, 19}},
         {{4, 12, 20}},
@@ -1320,7 +1876,7 @@ void OmnimagnetDriverNode::declareParameters() {
     }};
 
     // Declare parameters for each magnet (1-6) using the default channels
-    for (std::size_t i = 0; i < maxMagnets; ++i) {
+    for (std::size_t i = 0; i < maxMagnets_; ++i) {
         declareMagnetParameters(i + 1, default_channels[i]);
     }
 }
@@ -1334,9 +1890,9 @@ void OmnimagnetDriverNode::declareParameters() {
  * @param default_channels The default channels for the magnet, specified as an array of three integers (inner, mid, outer).
  */
 void OmnimagnetDriverNode::declareMagnetParameters(
-    std::size_t index,
-    const std::array<int, 3>& default_channels)
-{
+    const std::size_t index,
+    const std::array<int, 3>& default_channels
+) {
     std::string prefix = magnetNamespace(index);
 
     // ID
@@ -1364,12 +1920,12 @@ void OmnimagnetDriverNode::declareMagnetParameters(
     );
     
     this->declare_parameter<double>(
-        prefix + "wire_lengths.mid",
+        prefix + ".wire_lengths.mid",
         122.0
     );
 
     this->declare_parameter<double>(
-        prefix + "wire_lengths.outer",
+        prefix + ".wire_lengths.outer",
         132.0
     );
 
@@ -1404,18 +1960,12 @@ void OmnimagnetDriverNode::declareMagnetParameters(
     // Frame
     this->declare_parameter<std::vector<double>>(
         prefix + ".frame",
-        identityFrame_
+        {
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0
+        }
     );
-}
-
-/**
- * @brief Loads software parameters for the OmnimagnetDriverNode.
- * 
- * This function retrieves the values of the timing parameters "timing.default_duration_seconds" and "timing.timeout_seconds" from the ROS parameter server and stores them in the member variables defaultDuration_ and timeout_, respectively.
- */
-void OmnimagnetDriverNode::loadParameters() {
-    defaultDuration_ = this->get_parameter("timing.default_duration_seconds").as_double();
-    timeout_ = this->get_parameter("timing.timeout_seconds").as_double();
 }
 
 /**
@@ -1426,7 +1976,7 @@ void OmnimagnetDriverNode::loadParameters() {
  * @param index The index of the magnet for which to load configuration.
  * @return The configuration for the specified magnet.
  */
-MagnetConfig OmnimagnetDriverNode::loadMagnetConfig(std::size_t index) const {
+MagnetConfig OmnimagnetDriverNode::loadMagnetConfig(const std::size_t index) const {
     std::string prefix = magnetNamespace(index);
 
     MagnetConfig config;
@@ -1437,28 +1987,28 @@ MagnetConfig OmnimagnetDriverNode::loadMagnetConfig(std::size_t index) const {
     config.enabled = 
         this->get_parameter(prefix + ".enabled").as_bool();
 
-    config.wire_width =
+    config.wireWidth =
         this->get_parameter(prefix + ".wire_width").as_double();
 
-    config.inner_wire_length =
+    config.innerWireLength =
         this->get_parameter(prefix + ".wire_lengths.inner").as_double();
 
-    config.mid_wire_length =
-        this->get_parameter(prefix + "wire_lengths.mid").as_double();
+    config.midWireLength =
+        this->get_parameter(prefix + ".wire_lengths.mid").as_double();
 
-    config.outer_wire_length =
+    config.outerWireLength =
         this->get_parameter(prefix + ".wire_lengths.outer").as_double();
 
-    config.core_size =
+    config.coreSize =
         this->get_parameter(prefix + ".core_size").as_double();
 
-    config.inner_channel =
+    config.innerChannel =
         this->get_parameter(prefix + ".channels.inner").as_int();
 
-    config.mid_channel = 
+    config.midChannel = 
         this->get_parameter(prefix + ".channels.mid").as_int();
 
-    config.outer_channel =
+    config.outerChannel =
         this->get_parameter(prefix + ".channels.outer").as_int();
 
     config.estimate =
@@ -1473,21 +2023,22 @@ MagnetConfig OmnimagnetDriverNode::loadMagnetConfig(std::size_t index) const {
 /**
  * @brief Builds the timers for the OmnimagnetDriverNode.
  * 
- * This function creates two timers: a timeout timer and a duration timer. The timeout timer is set to trigger after the specified timeout duration, while the duration timer is set to trigger after the specified default duration.
+ * This function creates two timers: a timeout timer and a duration timer.
  * The duration timer is initially canceled and will be started when an experiment is run.
  */
 void OmnimagnetDriverNode::buildTimers() {
-    timeoutTimer = this->create_wall_timer(
+    timeout_ = this->get_parameter("timing.timeout_seconds").as_double();
+
+    timeoutTimer_ = this->create_wall_timer(
         std::chrono::duration<double>(timeout_),
         std::bind(&OmnimagnetDriverNode::timeoutCallback, this)
     );
 
-    durationTimer = this->create_wall_timer(
-        std::chrono::duration<double>(defaultDuration_),
+    durationTimer_ = this->create_wall_timer(
+        std::chrono::duration<double>(0.0),
         std::bind(&OmnimagnetDriverNode::durationCallback, this)
     );
-    
-    durationTimer->cancel(); // Hold timer until experiment run
+    durationTimer_->cancel(); // Hold timer until experiment run
 }
 
 /**
@@ -1501,11 +2052,11 @@ void OmnimagnetDriverNode::buildTimers() {
  * Any operations in progress will not be canceled.
  */
 void OmnimagnetDriverNode::resetDurationTimer(const double duration) {
-    if (durationTimer) {
-        durationTimer->cancel();
+    if (durationTimer_) {
+        durationTimer_->cancel();
     }
 
-    durationTimer = this->create_wall_timer(
+    durationTimer_ = this->create_wall_timer(
         std::chrono::duration<double>(duration),
         std::bind(&OmnimagnetDriverNode::durationCallback, this)
     );
@@ -1518,9 +2069,9 @@ void OmnimagnetDriverNode::resetDurationTimer(const double duration) {
  * while the finished publisher is used to publish messages when an experiment is finished.
  */
 void OmnimagnetDriverNode::buildPublishers() {
-    this->errorPublisher = 
+    this->errorPublisher_ = 
         this->create_publisher<omnimagnet_interfaces::msg::ErrorMessage>("driver_errors", 10);
-    this->finishedPublisher = 
+    this->finishedPublisher_ = 
         this->create_publisher<omnimagnet_interfaces::msg::FinishedMessage>("driver_finished", 10);
 }
 
@@ -1532,44 +2083,163 @@ void OmnimagnetDriverNode::buildPublishers() {
  * The services allow clients to send requests to control the omnimagnets in different modes (constant or rotating dipoles) for single or multiple magnets.
  */
 void OmnimagnetDriverNode::buildServices() {
-        smcServer = this->create_service<omnimagnet_interfaces::srv::SingleMagnetConstant>(
-            "single_magnet_constant",
-            std::bind(&OmnimagnetDriverNode::smcCallback,
-                this,
-                std::placeholders::_1,
-                std::placeholders::_2
-            )
-        );
-        smrServer = this->create_service<omnimagnet_interfaces::srv::SingleMagnetRotation>(
-            "single_magnet_rotation",
-            std::bind(&OmnimagnetDriverNode::smrCallback,
-                this,
-                std::placeholders::_1,
-                std::placeholders::_2
-            )
-        );
-        mmcServer = this->create_service<omnimagnet_interfaces::srv::MultiMagnetConstant>(
-            "multi_magnet_constant",
-            std::bind(&OmnimagnetDriverNode::mmcCallback,
-                this,
-                std::placeholders::_1,
-                std::placeholders::_2
-            )
-        );
-        mmrServer = this->create_service<omnimagnet_interfaces::srv::MultiMagnetRotation>(
-            "multi_magnet_rotation",
-            std::bind(&OmnimagnetDriverNode::mmrCallback,
-                this,
-                std::placeholders::_1,
-                std::placeholders::_2
-            )
-        );
-        resetServer = this->create_service<omnimagnet_interfaces::srv::DriverReset>(
-            "reset_driver",
-            std::bind(&OmnimagnetDriverNode::resetCallback,
-                this,
-                std::placeholders::_1,
-                std::placeholders::_2
-            )
-        );
+    smcServer_ = this->create_service<omnimagnet_interfaces::srv::SingleMagnetConstant>(
+        "single_magnet_constant",
+        std::bind(
+            &OmnimagnetDriverNode::smcCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+    smrServer_ = this->create_service<omnimagnet_interfaces::srv::SingleMagnetRotation>(
+        "single_magnet_rotation",
+        std::bind(
+            &OmnimagnetDriverNode::smrCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+    mmcServer_ = this->create_service<omnimagnet_interfaces::srv::MultiMagnetConstant>(
+        "multi_magnet_constant",
+        std::bind(
+            &OmnimagnetDriverNode::mmcCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+    mmrServer_ = this->create_service<omnimagnet_interfaces::srv::MultiMagnetRotation>(
+        "multi_magnet_rotation",
+        std::bind(
+            &OmnimagnetDriverNode::mmrCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+
+    sccServer_ = this->create_service<omnimagnet_interfaces::srv::SingleCurrentConstant>(
+        "single_current_constant",
+        std::bind(
+            &OmnimagnetDriverNode::sccCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+    scrServer_ = this->create_service<omnimagnet_interfaces::srv::SingleCurrentRotation>(
+        "single_current_rotation",
+        std::bind(
+            &OmnimagnetDriverNode::scrCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+    mccServer_ = this->create_service<omnimagnet_interfaces::srv::MultiCurrentConstant>(
+        "multi_current_constant",
+        std::bind(
+            &OmnimagnetDriverNode::mccCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+    mcrServer_ = this->create_service<omnimagnet_interfaces::srv::MultiCurrentRotation>(
+        "multi_current_rotation",
+        std::bind(
+            &OmnimagnetDriverNode::mcrCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+
+    resetServer_ = this->create_service<omnimagnet_interfaces::srv::DriverReset>(
+        "reset_driver",
+        std::bind(&OmnimagnetDriverNode::resetCallback,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2
+        )
+    );
+}
+
+/***************** Setting Current *****************/
+
+/**
+ * @brief Converts a current value to the corresponding D2A value for the OmniMagnet object.
+ * 
+ * This method takes a current value (double) as input and calculates the corresponding D2A value (lsampl_t).
+ * The conversion is based on the maximum D2A value set for the OmniMagnet object.
+ * 
+ * @param current A double representing the desired current value in A.
+ * 
+ * @return An lsampl_t representing the corresponding D2A value.
+ */
+lsampl_t OmnimagnetDriverNode::currentD2A(double current) {
+	// Range was interpreted from original code.
+	return mapRange<double, lsampl_t>(current, minCurrent_, maxCurrent_, minSample_, maxSample_);
+}
+
+/**
+ * @brief Sets the current for the OmniMagnet object.
+ * 
+ * This method sets the current values for an OmniMagnet object and send the current request to the corresponding D2A pins.
+ * Current is represented as a 3x1 Eigen vector, where each component corresponds to the current in the x, y, and z directions.
+ * 
+ * @param current A 3x1 Eigen vector representing the desired current values.
+ * @param magnet The omnimagnet being written to.
+ * 
+ * @return An integer indicating the success or failure of the operation. 
+ * A value of 1 indicates success, while a negative value indicates an error in writing to the D2A channels.
+ * 
+ * @note If any of the writes fails for any reason, all components will be reset to 0 current.
+ */
+int OmnimagnetDriverNode::runCurrent(const Eigen::Vector3d& current, const OmniMagnet& magnet) {
+    lsampl_t xCurrent = currentD2A(current[0]);
+    lsampl_t yCurrent = currentD2A(current[1]);
+    lsampl_t zCurrent = currentD2A(current[2]);
+
+    auto pins = magnet.pinNumbers();
+
+	// Write the D2A values to the corresponding channels using comedi_data_write. 
+	// Check for errors after each write
+    int retval;
+    retval = comedi_data_write(card_, subDevice_, pins[0], range_, aref_, xCurrent);
+    if (retval < 0)
+		goto fail_state1;
+
+    retval = comedi_data_write(card_, subDevice_, pins[1], range_, aref_, yCurrent);
+    if (retval < 0)
+		goto fail_state2;
+
+    retval = comedi_data_write(card_, subDevice_, pins[2], range_, aref_, zCurrent);
+    if (retval < 0)
+		goto fail_state3;
+
+	return 1;
+
+	// If any write fails, reset the previous channels to 0 to avoid leaving the magnet in an undefined state.
+	fail_state3:
+		comedi_data_write(card_, subDevice_, pins[2], range_, aref_, currentD2A(0));
+	fail_state2:
+		comedi_data_write(card_, subDevice_, pins[1], range_, aref_, currentD2A(0));
+	fail_state1:
+		comedi_data_write(card_, subDevice_, pins[0], range_, aref_, currentD2A(0));
+		
+		return retval;
+}
+
+/**
+ * @brief Checks if the system is running a previous command.
+ * 
+ * @return true if the system is already running or processing a command.
+ */
+bool OmnimagnetDriverNode::systemIsBusy() {
+    auto mode = runMode_.load(std::memory_order_acquire);
+
+    return mode != DriverMode::IDLE;
 }
