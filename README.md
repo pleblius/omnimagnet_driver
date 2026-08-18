@@ -314,11 +314,11 @@ Type:
 
 `DriverReset`
 
-## Request
+### Request
 
 None
 
-## Response
+### Response
 | Field | Type | Description |
 |------|------|-------------|
 | status | bool | True if driver successfully reset |
