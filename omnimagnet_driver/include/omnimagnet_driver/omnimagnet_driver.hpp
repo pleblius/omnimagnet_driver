@@ -46,10 +46,16 @@ Ver 1.0 by Tyler Wilcox, August 2026
 tyler.c.wilcox@utah.edu		
 *****************************************************/
 
+/**
+ * @brief Exception type for failed parameter loading.
+ */
 struct ParameterException : public std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+/**
+ * @brief Driver-state enum.
+ */
 enum class DriverMode {
     OFF,
     IDLE,
@@ -61,28 +67,29 @@ enum class DriverMode {
 class OmnimagnetDriverNode : public rclcpp::Node {
 
 public:
-    
+
     OmnimagnetDriverNode();
     void shutdown();
 
 private:
     // Operating Parameters
+
     const static std::size_t maxMagnets_{6};
     double timeout_;
 
     // Thread Managers
-    std::atomic<DriverMode> runMode_{DriverMode::OFF};
 
+    std::atomic<DriverMode> runMode_{DriverMode::OFF};
     std::thread controlThread_;
     std::mutex commandMutex_;
 
-
-
     // Containers
+
     std::map<int, OmniMagnet> omnimagnets_;
     std::vector<ActiveMagnetCommand> activeCommands_;
 
     // Ros2 Agents
+
     rclcpp::Publisher<omnimagnet_interfaces::msg::ErrorMessage>::SharedPtr errorPublisher_;
     rclcpp::Publisher<omnimagnet_interfaces::msg::FinishedMessage>::SharedPtr finishedPublisher_;
 
@@ -101,7 +108,8 @@ private:
     rclcpp::TimerBase::SharedPtr timeoutTimer_;
     rclcpp::TimerBase::SharedPtr durationTimer_;
 
-    // D2A card
+    // D2A card and parameters
+
     std::string device_;
     comedi_t *card_;
     int subDevice_;
@@ -118,30 +126,38 @@ private:
     double inhibVolt_;
 
     /******* FUNCTIONS *******/
+
+    void resetDurationTimer(double);
+    
+    // Ros Builders
+
     void declareParameters();
     void declareMagnetParameters(std::size_t, const std::array<int, 3>&);
-    MagnetConfig loadMagnetConfig(std::size_t) const;
     void buildTimers();
-    void resetDurationTimer(double);
     void buildPublishers();
     void buildServices();
+    
+    // Setup
+
     void setupHardware();
     void setupMagnets();
-    lsampl_t currentD2A(double);
-    int runCurrent(const Eigen::Vector3d&, const OmniMagnet&);
+    MagnetConfig loadMagnetConfig(std::size_t) const;
     bool shutdownInhibs();
-
+    
     // Timer callbacks
+
     void timeoutCallback();
     void durationCallback();
-
+    
     // Server callbacks
+
     void resetCallback(
         [[maybe_unused]] const omnimagnet_interfaces::srv::DriverReset::Request::SharedPtr,
         const omnimagnet_interfaces::srv::DriverReset::Response::SharedPtr
     );
-
+    
     // Dipole-driven callbacks
+
     void smcCallback(
         const omnimagnet_interfaces::srv::SingleMagnetConstant::Request::SharedPtr,
         const omnimagnet_interfaces::srv::SingleMagnetConstant::Response::SharedPtr
@@ -158,8 +174,9 @@ private:
         const omnimagnet_interfaces::srv::MultiMagnetRotation::Request::SharedPtr,
         const omnimagnet_interfaces::srv::MultiMagnetRotation::Response::SharedPtr
     );
-
+    
     // Current-driven callbacks
+
     void sccCallback(
         const omnimagnet_interfaces::srv::SingleCurrentConstant::Request::SharedPtr,
         const omnimagnet_interfaces::srv::SingleCurrentConstant::Response::SharedPtr
@@ -176,13 +193,18 @@ private:
         const omnimagnet_interfaces::srv::MultiCurrentRotation::Request::SharedPtr,
         const omnimagnet_interfaces::srv::MultiCurrentRotation::Response::SharedPtr
     );
-
+    
+    // Control Functions
 
     void controlLoop();
     void resetCommands(std::vector<ActiveMagnetCommand>&);
     void loadNewCommands(std::vector<ActiveMagnetCommand>&);
     void runCommands(std::vector<ActiveMagnetCommand>&, double);
-
+    lsampl_t currentD2A(double);
+    int runCurrent(const Eigen::Vector3d&, const OmniMagnet&);
     bool systemIsBusy();
+    
+    // Misc
+    
 };
 

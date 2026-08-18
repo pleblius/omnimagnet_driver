@@ -6,27 +6,27 @@ This package contains the source code and header files for the omnimagnet driver
 
 There are two build files:
 
-* ```CMakeLists.txt``` contains the Cmake build specifications for the package
-* ```package.xml``` contains the package build specifications for ros2
+* `CMakeLists.txt` contains the CMake build specifications for the package
+* `package.xml` contains the package build specifications for ros2
 
 These files should only be altered if code dependencies change.
 
 # Source Code
 
-There are two source files in this package, located in the ```src``` directory: 
+There are two source files in this package, located in the `src` directory: 
 
-* ```omnimagnet.cpp``` containing the source code for the omnimagnet objects
-* ```omnimagnet_driver.cpp``` containing the source code for the ros2 driver node
+* `omnimagnet.cpp` contains the source code for the omnimagnet objects
+* `omnimagnet_driver.cpp` contains the source code for the ros2 driver node
 
-There are two associated header files located in the ```include/omnimagnet_driver``` directory:
+There are two associated header files located in the `include/omnimagnet_driver` directory:
 
-* ```omnimagnet_driver.hpp``` 
-* ```omnimagnet.hpp```
+* `omnimagnet_driver.hpp`
+* `omnimagnet.hpp`
 
 ## Omnimagnet
 
-The source code for the operation of the omnimagnets is contained in ```omnimagnet.cpp```.
+The source code for the operation of the omnimagnets is contained in `omnimagnet.cpp`.
 
 ## Omnimagnet Driver
 
-The source code for the ros2 driver is contained in ```omnimagnet_driver.cpp```. It 
+The source code for the ros2 driver is contained in `omnimagnet_driver.cpp`.

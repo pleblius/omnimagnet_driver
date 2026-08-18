@@ -18,14 +18,18 @@ This package provides:
 
 The driver supports:
 
-### Single Magnet Operations
-- Constant dipole field generation
-- Rotating dipole field generation
+### Single-Magnet Operations
+- Constant dipole generation
+- Rotating dipole generation
+- Constant current generation
+- Rotating current generation
 
-### Multi Magnet Operations
+### Multi-Magnet Operations
 - Multiple synchronized constant dipoles
 - Multiple synchronized rotating dipoles
-- Shared or independent parameters
+- Multiple synchronized constant currents
+- Multiple synchronized rotating currents
+- Shared or independent parameters between magnets
 
 ### Safety Features
 - Automatic hardware shutdown on node exit
@@ -62,7 +66,7 @@ The driver automatically configures:
 | 25 | Amplifier inhibit |
 | 26 | Amplifier inhibit |
 
-These are initialized to **75% output** during startup.
+These are initialized to **5 V** during startup.
 
 ### Operating Pins
 
@@ -97,7 +101,7 @@ ID 6 is reserved but currently disabled.
 
 ### ROS Dependencies
 
-- ROS 2 (tested with Humble)
+- ROS 2 Humble
 - `rclcpp`
 
 ### System Dependencies
@@ -141,7 +145,10 @@ It relies on code contained in:
 ```
 omnimagnet_driver/include/omnimagnet_driver/omnimagnet_driver.hpp
 omnimagnet_driver/include/omnimagnet_driver/omnimagnet.hpp
+omnimagnet_driver/include/omnimagnet_driver/commands.hpp
+omnimagnet_driver/src/omnimagnet_driver.cpp
 omnimagnet_driver/src/omnimagnet.cpp
+omnimagnet_driver/src/commands.cpp
 ```
 
 Launch setup is contained in
@@ -155,7 +162,7 @@ and the launch file in
 
 ## Building
 
-To build the project, make sure the repository in ```~/ros2_ws/src``` is up-to-date. From ```~/ros2_ws```, use the bash command
+To build the project, make sure the repository in ```~/ros2_ws/src``` is up-to-date with the repository from GitHub. From ```~/ros2_ws```, use the bash command
 ```bash
 colcon build
 ```
@@ -172,10 +179,10 @@ If errors occur due to a previous build, deleting the build folders may be neces
 ```bash
 rm -rf build install log
 ```
-Invoking ```colcon build``` will then re-build all packages from the source directory.
+Invoking ```colcon build``` will then rebuild all packages from the source directory.
 Note: If the source directory in ```ros2_ws/src``` is deleted, it will need to be reacquired before the project can be built.
 
-## Running
+## Launching
 
 Launch the driver using launch file with configuration parameters:
 
@@ -187,8 +194,9 @@ To run the driver directly:
 ```bash
 ros2 run omnimagnet_driver omnimagnet_driver
 ```
+Note: Running the driver directly will not load the parameter file, so all parameters will be default-configured; by default, all hardware is disabled, so the driver will do nothing if passed a command.
 
-Driver will timeout after 300 seconds of not receiving any requests.
+The driver will time out after 300 seconds of not receiving any requests.
 
 ---
 
@@ -202,10 +210,10 @@ The hardware configuration parameters control the D2A setup within the code and 
 
 ### Timing Configuration
 
-The timing configuration parameters are used to control the operation of the driver. There are three parameters:
+The timing configuration parameters are used to control the operation of the driver. There are two parameters:
 
-* timeout_seconds: How long the driver will wait for a new request before shutting off. (Default value: 300.0)
-* control_frequency_hz: The default update frequency for the control loop to send new current commands to the omnimagnets. (Default value: 1000.0)
+* timeout_seconds: How long the driver will wait for a new request before shutting off, in seconds. (Default value: 300.0)
+* control_frequency_hz: The default update frequency (in Hertz) for the control loop to send new current commands to the omnimagnets. (Default value: 1000.0)
 
 ### Magnet Configuration
 
@@ -232,7 +240,7 @@ The magnet configuration parameters relate the omnimagnet hardware to the omnima
 
 ## Vector 3
 
-A copy of ros2's Vector3 interface type to simplify dependencies
+A copy of ROS 2's Vector3 interface type to simplify dependencies
 
 | Field | Type |
 |------|------|
@@ -257,16 +265,16 @@ Type:
 | Field | Type | Description |
 |------|------|-------------|
 | error_desc | string | Brief description of cause of error |
-| shutdown | bool | True if the driver initiated a shutdown |
+| shutdown | bool | True if the driver initiated a shutdown due to error |
 
-Reports errors that prevent proper driver operation and whether a shutdown has been initiated.
+Reports errors that prevent proper driver operation. Errors that are considered unrecoverable will initiate a driver shutdown.
 
 Specifically errors:
 
 - Hardware initialization failures
-- Magnet shutdown failures
-- Timeout shutdowns
+- Magnet write failures
 - Runtime driver faults
+- Timeout shutdowns
 
 ---
 
@@ -294,231 +302,7 @@ Published when an experiment completes successfully.
 
 ---
 
-# 1. Single Magnet Constant
-
-Service:
-
-```bash
-/single_magnet_constant
-```
-
-Type:
-
-`SingleMagnetConstant`
-
-## Request
-
-| Field | Type | Description |
-|------|------|-------------|
-| omnimagnet | uint64 | Magnet ID |
-| dipole_vec | Vector3 | Desired dipole unit vector |
-| dipole_strength | float64 | Field strength (Am^2)|
-| duration | float64 | Runtime (sec) |
-
-## Response
-
-| Field | Type | Description |
-|------|------|-------------|
-| error | bool | If an error prevented service execution |
-| error_desc | string | Brief description of cause of error |
-
-### Example
-
-```bash
-ros2 service call /single_magnet_constant omnimagnet_interfaces/srv/SingleMagnetConstant "
-{
-  omnimagnet: 0,
-  dipole_vec: {x: 1.0, y: 0.0, z: 0.0},
-  dipole_strength: 40.0,
-  duration: 10.0
-}"
-```
-
----
-
-# 2. Single Magnet Rotation
-
-Service:
-
-```bash
-/single_magnet_rotation
-```
-
-Type:
-
-`SingleMagnetRotation`
-
-## Request
-
-| Field | Type | Description |
-|------|------|--------------|
-| omnimagnet | uint64 | Magnet ID |
-| rotation_vector | Vector3 | Rotation unit vector |
-| dipole_strength | float64 | Dipole strength (Am^2) |
-| rotation_freq | float64 | Rotation Frequency (Hz) |
-| phase_offset | float64 | Initial Rotation Phase Shift (deg) |
-| duration | float64 | Runtime (sec) |
-
-## Response
-| Field | Type | Description |
-|------|------|-------------|
-| error | bool | If an error prevented service execution |
-| error_desc | string | Brief description of cause of error |
-
-### Example
-
-```bash
-ros2 service call /single_magnet_rotation omnimagnet_interfaces/srv/SingleMagnetRotation "
-{
-  omnimagnet: 0,
-  rotation_vector: {x: 0.0, y: 0.0, z: 1.0},
-  dipole_strength: 40.0,
-  rotation_freq: 5.0,
-  phase_offset: 90.0,
-  duration: 20.0
-}"
-```
-
----
-
-# 3. Multi Magnet Constant
-
-Service:
-
-```bash
-/multi_magnet_constant
-```
-
-Type:
-
-`MultiMagnetConstant`
-
-## Request
-
-| Field | Type | Description |
-|------|------|--------------|
-| omnimagnets | uint64[] | List of Magnet IDs |
-| dipole_vecs | Vector3[] | Index-associated dipole unit vectors |
-| dipole_strengths | float64[] | Index-associated dipole strengths (Am^2) |
-| duration | float64 | Runtime (sec) |
-
-## Response
-| Field | Type | Description |
-|------|------|-------------|
-| error | bool | If an error prevented service execution |
-| error_desc | string | Brief description of cause of error |
-
-### Supports
-
-- One dipole vector for all magnets
-- One strength for all magnets
-- Per-magnet vectors/strengths
-
-### Notes
-- `dipole_vecs` must be either length 1 or the same length as `omnimagnets`
-- `dipole_strengths` must be either length 1 or the same length as `omnimagnets`
-
-### Examples
-
-```bash
-ros2 service call /multi_magnet_constant omnimagnet_interfaces/srv/MultiMagnetConstant "
-{
-  omnimagnets: [0,1,2],
-  dipole_vecs: [
-    {x: 1.0, y: 0.0, z: 0.0}
-  ],
-  dipole_strengths: [40.0],
-  duration: 10.0
-}"
-```
-
-```bash
-ros2 service call /multi_magnet_constant omnimagnet_interfaces/srv/MultiMagnetConstant "
-{
-  omnimagnets: [0,1,2],
-  dipole_vecs: [
-    {x: 1.0, y: 0.0, z: 0.0},
-    {x: 0.3, y: 0.4, z: 0.5},
-    {x: 0.5, y: 0.0, z: 0.5}
-  ],
-  dipole_strengths: [40.0, 15.0, 25.0],
-  duration: 45.0
-}"
-```
-
----
-
-# 4. Multi Magnet Rotation
-
-Service:
-
-```bash
-/multi_magnet_rotation
-```
-
-Type:
-
-`MultiMagnetRotation`
-
-## Request
-
-| Field | Type | Description |
-|------|------|--------------|
-| omnimagnets | uint64[] | List of Magnet IDs |
-| rotation_vectors | Vector3[] | Index-associated rotation unit vectors |
-| rotation_freqs | float64[] | Index-associated rotation frequencies (Hz) |
-| dipole_strengths | float64[] | Index-associated dipole strengths (Am^2) |
-| phase_offsets | float64[] | Index-associated rotation offset (deg) |
-| duration | float64 | Runtime (sec) |
-
-## Response
-| Field | Type | Description |
-|------|------|-------------|
-| error | bool | If an error prevented service execution |
-| error_desc | string | Brief description of cause of error |
-
-### Supports:
-
-- Synchronous rotation
-- Shared rotation vector
-- Shared frequency
-- Shared phase offset
-- Shared strength
-- Per-magnet overrides
-- Negative frequencies
-
-### Notes
--`rotation_vectors`, `rotation_freqs`, `dipole_strengths`, and `phase_offsets` must be either length 1 or the same length as `omnimagnets`
-
-### Phase Calculation
-- Initial dipole vector is calculated by crossing the `x` vector with the rotation unit vector `omega`
-    - If `x` and `omega` are nearly parallel, the `y` vector is used instead
-- Phase shift represents movement in the direction of rotation from this initial vector by `phase_offset` degrees
-- If rotation is in the same direction, use identical rotation vectors with same-signed frequencies
-- For opposed rotation:
-    - Use identical rotation vectors with opposite-signed frequencies (Both vectors will have the same 0-phase angle)
-    - Use opposed rotation vectors with same-signed frequencies (Vectors will have opposite 0-phase angle)
-        - Identical to using identical rotation vectors with opposite-signed frequencies and a phase-shift of 180 degrees
-
-### Example
-
-```bash
-ros2 service call /multi_magnet_rotation omnimagnet_interfaces/srv/MultiMagnetRotation "
-{
-  omnimagnets: [0,1],
-  rotation_vectors: [
-    {x: 0.0, y: 0.0, z: 1.0}
-  ],
-  dipole_strengths: [40.0],
-  rotation_freqs: [5.0],
-  phase_offsets: [0.0,180.0],
-  duration: 20.0
-}"
-```
-
----
-
-# 5. Driver Reset
+# Driver Reset
 
 Service:
 
@@ -546,7 +330,7 @@ Immediately:
 - Cancels duration timer
 - Restarts timeout timer
 
-Operations *cannot* be run simultaneously; if a new operation is desired before the previous run finishes, `/reset_driver` must be invoked first, either from another ros2 program or from the terminal.
+Operations *cannot* be run simultaneously; if a new operation is desired before the previous run finishes, `/reset_driver` must be invoked first, either from another ROS 2 program or from the terminal.
 
 To manually command a driver reset, you can use the terminal command
 ```bash
@@ -554,6 +338,605 @@ ros2 service call /reset_driver omnimagnet_interfaces/srv/DriverReset "{}"
 ```
 
 ---
+
+## Dipole Requests
+For requests that desire a specified magnetic dipole, the driver will use the omnimagnets' internal frames to calculate the necessary currents.
+Note: All vectors are converted to unit vectors; strength will be determined by dipole_strength fields.
+
+### 1. Single Magnet Constant
+
+Service:
+
+```bash
+/single_magnet_constant
+```
+
+Type:
+
+`SingleMagnetConstant`
+
+#### Request
+
+| Field | Type | Description |
+|------|------|-------------|
+| omnimagnet | uint64 | Magnet ID |
+| dipole_vec | Vector3 | Dipole vector (direction) |
+| dipole_strength | float64 | Dipole strength (Am^2)|
+| duration | float64 | Runtime (sec) |
+
+#### Response
+
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of the error |
+
+#### Example
+
+```bash
+ros2 service call /single_magnet_constant omnimagnet_interfaces/srv/SingleMagnetConstant 
+"{
+  omnimagnet: 5,
+  dipole_vec: {x: 1.0, y: 0.0, z: 0.0},
+  dipole_strength: 40.0,
+  duration: 10.0
+}"
+```
+
+---
+
+### 2. Single Magnet Rotation
+
+Service:
+
+```bash
+/single_magnet_rotation
+```
+
+Type:
+
+`SingleMagnetRotation`
+
+#### Request
+
+| Field | Type | Description |
+|------|------|--------------|
+| omnimagnet | uint64 | Magnet ID |
+| rotation_vector | Vector3 | Rotation vector |
+| dipole_strength | float64 | Dipole strength (Am^2) |
+| rotation_freq | float64 | Rotation Frequency (Hz) |
+| phase_offset | float64 | Initial Rotation Phase Shift (deg) |
+| duration | float64 | Runtime (sec) |
+
+#### Response
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of error |
+
+#### Example
+
+```bash
+ros2 service call /single_magnet_rotation omnimagnet_interfaces/srv/SingleMagnetRotation 
+"{
+  omnimagnet: 2,
+  rotation_vector: {x: 0.0, y: 0.0, z: 1.0},
+  dipole_strength: 40.0,
+  rotation_freq: 5.0,
+  phase_offset: 90.0,
+  duration: 20.0
+}"
+```
+
+#### Phase Calculation
+- Initial dipole vector is calculated by crossing the rotation vector with the `x` or `y` axis
+  - Uses whichever axis `omega` is less parallel to
+- Rotation uses the right-hand rule for positive rotation frequency
+- Phase shift will be in the direction of rotation by `phase_offset` degrees
+---
+
+### 3. Multi Magnet Constant
+
+Service:
+
+```bash
+/multi_magnet_constant
+```
+
+Type:
+
+`MultiMagnetConstant`
+
+#### Request
+
+| Field | Type | Description |
+|------|------|--------------|
+| omnimagnets | uint64[] | List of Magnet IDs |
+| dipole_vecs | Vector3[] | Index-associated dipole vectors |
+| dipole_strengths | float64[] | Index-associated dipole strengths (Am^2) |
+| duration | float64 | Runtime (sec) |
+
+#### Response
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of error |
+
+#### Supports
+
+- Shared dipole vector
+- Shared dipole strength
+- Per-magnet overrides
+  - Applies to each list independently
+
+#### Notes
+- `dipole_vecs` and `dipole_strengths` must be either length 1 or the same length as `omnimagnets`
+- Entries are index-associated, meaning `omnimagnets[i]` will have vector `dipole_vecs[i]` and strength `dipole_strengths[i]`
+  - Disregarded for any lists that have length 1 (Value is applied universally)
+
+#### Examples
+##### Single vector, single strength:
+```bash
+ros2 service call /multi_magnet_constant omnimagnet_interfaces/srv/MultiMagnetConstant
+"{
+  omnimagnets: [1, 4, 5],
+  dipole_vecs: [
+    {x: 1.0, y: 0.0, z: 0.0}
+  ],
+  dipole_strengths: [40.0],
+  duration: 10.0
+}"
+```
+
+##### Independent vectors, independent strengths:
+```bash
+ros2 service call /multi_magnet_constant omnimagnet_interfaces/srv/MultiMagnetConstant
+"{
+  omnimagnets: [2,3,4],
+  dipole_vecs: [
+    {x: 1.0, y: 0.0, z: 0.0},
+    {x: 0.3, y: 0.4, z: 0.5},
+    {x: 0.5, y: 0.0, z: 0.5}
+  ],
+  dipole_strengths: [40.0, 15.0, 25.0],
+  duration: 45.0
+}"
+```
+
+##### Shared vector, independent strengths:
+```bash
+ros2 service call /multi_magnet_constant omnimagnet_interfaces/srv/MultiMagnetConstant
+"{
+  omnimagnets: [1, 5],
+  dipole_vecs: [
+    {x: 1.0, y: 1.0, z: 1.0}
+  ],
+  dipole_strengths: [5.0, 7.0],
+  duration: 17
+}"
+```
+---
+
+### 4. Multi Magnet Rotation
+
+Service:
+
+```bash
+/multi_magnet_rotation
+```
+
+Type:
+
+`MultiMagnetRotation`
+
+#### Request
+
+| Field | Type | Description |
+|------|------|--------------|
+| omnimagnets | uint64[] | List of Magnet IDs |
+| rotation_vectors | Vector3[] | Index-associated rotation vectors |
+| rotation_freqs | float64[] | Index-associated rotation frequencies (Hz) |
+| dipole_strengths | float64[] | Index-associated dipole strengths (Am^2) |
+| phase_offsets | float64[] | Index-associated rotation offsets (deg) |
+| duration | float64 | Runtime (sec) |
+
+#### Response
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of error |
+
+#### Supports:
+
+- Synchronous rotation
+- Shared rotation vector
+- Shared frequency
+- Shared phase offset
+- Shared strength
+- Per-magnet overrides
+  - Applies to each list independently
+- Negative frequencies
+- Arbitrary phase shifts
+
+#### Notes
+- `rotation_vectors`, `rotation_freqs`, `dipole_strengths`, and `phase_offsets` must be either length 1 or the same length as `omnimagnets`
+
+#### Phase Calculation
+- Initial dipole vector is calculated by crossing the rotation vector with the `x` or `y` axis
+  - Uses whichever axis `omega` is less parallel to
+- Rotation uses the right-hand rule for positive rotation frequency
+- Phase shift will be in the direction of rotation by `phase_offset` degrees
+- If rotation is in the same direction, use identical rotation vectors with same-signed frequencies
+- For opposed rotation:
+  - Same starting dipole:
+    - Use identical rotation vectors with opposite-signed frequencies
+  - Opposite starting dipole:
+    - Use opposite rotation vectors with same-signed frequencies
+    - Alt: Use identical rotation vectors with opposite-signed frequencies and one 180-degree phase shift
+
+#### Examples
+##### Identical Rotation:
+```bash
+ros2 service call /multi_magnet_rotation omnimagnet_interfaces/srv/MultiMagnetRotation
+"{
+  omnimagnets: [1, 2],
+  rotation_vectors: [
+    {x: 0.0, y: 0.0, z: 1.0}
+  ],
+  dipole_strengths: [40.0],
+  rotation_freqs: [5.0],
+  phase_offsets: [0.0],
+  duration: 20.0
+}"
+```
+
+##### Opposed Rotation, Same Starting Dipole:
+```bash
+ros2 service call /multi_magnet_rotation omnimagnet_interfaces/srv/MultiMagnetRotation
+"{
+  omnimagnets: [4, 5],
+  rotation_vectors: [
+    {x: 0.5, y: 0.5, z: 0.0}
+  ],
+  dipole_strengths: [20.0],
+  rotation_freqs: [10.0, -10.0],
+  phase_offsets: [0.0],
+  duration: 10.0
+}"
+```
+
+##### Opposed Rotation, Opposite Starting Dipole:
+```bash
+ros2 service call /multi_magnet_rotation omnimagnet_interfaces/srv/MultiMagnetRotation
+"{
+  omnimagnets: [2, 3],
+  rotation_vectors: [
+    {x: 1.0, y: 0.0, z: 0.0},
+    {x: -1.0, y: 0.0, z: 0.0}
+  ],
+  dipole_strengths: [15.0],
+  rotation_freqs: [10.0],
+  phase_offsets: [0.0],
+  duration: 15.0
+}"
+```
+
+##### Opposed Rotation, Opposite Starting Dipole (Alternative):
+```bash
+ros2 service call /multi_magnet_rotation omnimagnet_interfaces/srv/MultiMagnetRotation
+"{
+  omnimagnets: [1, 4],
+  rotation_vectors: [
+    {x: 1.0, y: 0.0, z: 0.0}
+  ],
+  dipole_strengths: [15.0],
+  rotation_freqs: [10.0, -10.0],
+  phase_offsets: [0.0, 180.0],
+  duration: 15.0
+}"
+```
+---
+
+---
+
+## Current Requests
+For requests that desire a specified current through the magnet.
+Note: All vectors are converted to unit vectors; strength will be determined by current_strength fields.
+
+### 1. Single Current Constant
+
+Service:
+
+```bash
+/single_current_constant
+```
+
+Type:
+
+`SingleCurrentConstant`
+
+#### Request
+
+| Field | Type | Description |
+|------|------|-------------|
+| omnimagnet | uint64 | Magnet ID |
+| current_vec | Vector3 | Current vector (direction) |
+| current_strength | float64 | Current strength (A)|
+| duration | float64 | Runtime (sec) |
+
+#### Response
+
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of the error |
+
+#### Example
+
+```bash
+ros2 service call /single_current_constant omnimagnet_interfaces/srv/SingleCurrentConstant 
+"{
+  omnimagnet: 5,
+  current_vec: {x: 1.0, y: 0.0, z: 0.0},
+  current_strength: 5.0,
+  duration: 10.0
+}"
+```
+
+---
+
+### 2. Single Current Rotation
+
+Service:
+
+```bash
+/single_current_rotation
+```
+
+Type:
+
+`SingleCurrentRotation`
+
+#### Request
+
+| Field | Type | Description |
+|------|------|--------------|
+| omnimagnet | uint64 | Magnet ID |
+| rotation_vector | Vector3 | Rotation vector |
+| current_strength | float64 | Current strength (A) |
+| rotation_freq | float64 | Rotation Frequency (Hz) |
+| phase_offset | float64 | Initial Rotation Phase Shift (deg) |
+| duration | float64 | Runtime (sec) |
+
+#### Response
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of error |
+
+#### Example
+
+```bash
+ros2 service call /single_current_rotation omnimagnet_interfaces/srv/SingleCurrentRotation 
+"{
+  omnimagnet: 2,
+  rotation_vector: {x: 0.0, y: 0.0, z: 1.0},
+  current_strength: 2.0,
+  rotation_freq: 5.0,
+  phase_offset: 90.0,
+  duration: 20.0
+}"
+```
+
+#### Phase Calculation
+- Initial current vector is calculated by crossing the rotation vector with the `x` or `y` axis
+  - Uses whichever axis `omega` is less parallel to
+- Rotation uses the right-hand rule for positive rotation frequency
+- Phase shift will be in the direction of rotation by `phase_offset` degrees
+---
+
+### 3. Multi Current Constant
+
+Service:
+
+```bash
+/multi_current_constant
+```
+
+Type:
+
+`MultiCurrentConstant`
+
+#### Request
+
+| Field | Type | Description |
+|------|------|--------------|
+| omnimagnets | uint64[] | List of Magnet IDs |
+| current_vecs | Vector3[] | Index-associated current vectors |
+| current_strengths | float64[] | Index-associated current strengths (A) |
+| duration | float64 | Runtime (sec) |
+
+#### Response
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of error |
+
+#### Supports
+
+- Shared current vector
+- Shared current strength
+- Per-magnet overrides
+  - Applies to each list independently
+
+#### Notes
+- `current_vecs` and `current_strengths` must be either length 1 or the same length as `omnimagnets`
+- Entries are index-associated, meaning `omnimagnets[i]` will have vector `current_vecs[i]` and strength `current_strengths[i]`
+  - Disregarded for any lists that have length 1 (Value is applied universally)
+
+#### Examples
+##### Single vector, single strength:
+```bash
+ros2 service call /multi_current_constant omnimagnet_interfaces/srv/MultiCurrentConstant
+"{
+  omnimagnets: [1, 4, 5],
+  current_vecs: [
+    {x: 1.0, y: 0.0, z: 0.0}
+  ],
+  current_strengths: [8.0],
+  duration: 10.0
+}"
+```
+
+##### Independent vectors, independent strengths:
+```bash
+ros2 service call /multi_current_constant omnimagnet_interfaces/srv/MultiCurrentConstant
+"{
+  omnimagnets: [2, 3, 4],
+  current_vecs: [
+    {x: 1.0, y: 0.0, z: 0.0},
+    {x: 0.3, y: 0.4, z: 0.5},
+    {x: 0.5, y: 0.0, z: 0.5}
+  ],
+  current_strengths: [2.0, 6.0, 8.0],
+  duration: 45.0
+}"
+```
+
+##### Shared vector, independent strengths:
+```bash
+ros2 service call /multi_current_constant omnimagnet_interfaces/srv/MultiCurrentConstant
+"{
+  omnimagnets: [1, 5],
+  current_vecs: [
+    {x: 1.0, y: 1.0, z: 1.0}
+  ],
+  current_strengths: [5.0, 7.0],
+  duration: 17.0
+}"
+```
+---
+
+### 4. Multi Current Rotation
+
+Service:
+
+```bash
+/multi_current_rotation
+```
+
+Type:
+
+`MultiCurrentRotation`
+
+#### Request
+
+| Field | Type | Description |
+|------|------|--------------|
+| omnimagnets | uint64[] | List of Magnet IDs |
+| rotation_vectors | Vector3[] | Index-associated rotation vectors |
+| rotation_freqs | float64[] | Index-associated rotation frequencies (Hz) |
+| current_strengths | float64[] | Index-associated current strengths (A) |
+| phase_offsets | float64[] | Index-associated rotation offsets (deg) |
+| duration | float64 | Runtime (sec) |
+
+#### Response
+| Field | Type | Description |
+|------|------|-------------|
+| error | bool | If an error prevented service execution |
+| error_desc | string | Brief description of error |
+
+#### Supports:
+
+- Synchronous rotation
+- Shared rotation vector
+- Shared frequency
+- Shared phase offset
+- Shared strength
+- Per-magnet overrides
+  - Applies to each list independently
+- Negative frequencies
+- Arbitrary phase shifts
+
+#### Notes
+- `rotation_vectors`, `rotation_freqs`, `current_strengths`, and `phase_offsets` must be either length 1 or the same length as `omnimagnets`
+
+#### Phase Calculation
+- Initial current vector is calculated by crossing the rotation vector with the `x` or `y` axis
+  - Uses whichever axis `omega` is less parallel to
+- Rotation uses the right-hand rule for positive rotation frequency
+- Phase shift will be in the direction of rotation by `phase_offset` degrees
+- If rotation is in the same direction, use identical rotation vectors with same-signed frequencies
+- For opposed rotation:
+  - Same starting current:
+    - Use identical rotation vectors with opposite-signed frequencies
+  - Opposite starting current:
+    - Use opposite rotation vectors with same-signed frequencies
+    - Alt: Use identical rotation vectors with opposite-signed frequencies and one 180-degree phase shift
+
+#### Examples
+##### Identical Rotation:
+```bash
+ros2 service call /multi_current_rotation omnimagnet_interfaces/srv/MultiCurrentRotation
+"{
+  omnimagnets: [1, 2],
+  rotation_vectors: [
+    {x: 0.0, y: 0.0, z: 1.0}
+  ],
+  current_strengths: [10.0],
+  rotation_freqs: [5.0],
+  phase_offsets: [0.0],
+  duration: 20.0
+}"
+```
+
+##### Opposed Rotation, Same Starting Current:
+```bash
+ros2 service call /multi_current_rotation omnimagnet_interfaces/srv/MultiCurrentRotation
+"{
+  omnimagnets: [2, 3],
+  rotation_vectors: [
+    {x: 1.0, y: 0.0, z: 0.0}
+  ],
+  current_strengths: [5.0],
+  rotation_freqs: [10.0, -10.0],
+  phase_offsets: [0.0],
+  duration: 10.0
+}"
+```
+
+##### Opposed Rotation, Opposite Starting Current:
+```bash
+ros2 service call /multi_current_rotation omnimagnet_interfaces/srv/MultiCurrentRotation
+"{
+  omnimagnets: [2, 3],
+  rotation_vectors: [
+    {x: 1.0, y: 0.0, z: 0.0},
+    {x: -1.0, y: 0.0, z: 0.0}
+  ],
+  current_strengths: [5.0],
+  rotation_freqs: [10.0],
+  phase_offsets: [0.0],
+  duration: 15.0
+}"
+```
+
+##### Opposed Rotation, Opposite Starting Current (Alternative):
+```bash
+ros2 service call /multi_current_rotation omnimagnet_interfaces/srv/MultiCurrentRotation
+"{
+  omnimagnets: [2, 3],
+  rotation_vectors: [
+    {x: 1.0, y: 0.0, z: 0.0}
+  ],
+  current_strengths: [5.0],
+  rotation_freqs: [10.0, -10.0],
+  phase_offsets: [0.0, 180.0],
+  duration: 15.0
+}"
+```
+
+--- 
 
 # Real-Time Control
 
@@ -564,11 +947,11 @@ A dedicated control thread runs at:
 ```
 
 The thread:
-
-1. Copies active commands under mutex protection
-2. Computes target dipole
-3. Converts dipole to coil currents
-4. Writes currents to hardware
+1. Checks driver state
+2. Loads or resets commands if necessary
+3. Calculates delta-t for the current experiment
+4. Determines necessary current for each magnet
+5. Sends current commands to D2A
 
 This keeps ROS callbacks separate from hardware timing.
 
@@ -580,36 +963,29 @@ This keeps ROS callbacks separate from hardware timing.
 
 On shutdown:
 
-- Control thread stops
-- All magnets set to zero current
-- Amplifier pins reset
+- All magnets are set to zero current
+- Amplifier pins are set to zero
 
 ---
 
 ## Timeout
 
-If no controller command is received for:
+If no controller command is received within the timeout duration (default 300 seconds), the driver will:
 
-```text
-300 seconds
-```
-
-The driver:
-
-1. Publishes error
-2. Safely shuts down magnets
-3. Terminates operation
+1. Publish timeout message
+2. Safely shut down magnets
+3. Terminate ROS node
 
 ---
 
-# Validation Checks
+# Command Validation Checks
 
-Requests are rejected if:
+Service requests are rejected if:
 
-- Magnet ID is invalid
-- Vector magnitude is zero
-- Vector contains NaN
-- Parameter array sizes mismatch
+- Magnet ID(s) are invalid
+- Vector magnitude is zero or not finite
+- Command duration is not a positive value
+- Array size mismatch
 - Another experiment is already running
 
 ---
@@ -654,13 +1030,19 @@ Current code still has several planned improvements:
 - [x] Parameterize timeout values
 - [x] Parameterize control loop frequency
 - [x] Add launch file
-- [ ] Add transform subscriber for controller world-frame transformations
-- [ ] Add current-based alternative drive requests
+- [x] Add current-based alternative drive requests
+- [ ] Split DriverNode setup and control logic into separate classes
+- [ ] Add saturation detection and warning
+- [ ] Replace dipole estimation method with calibrated values
+- [ ] Add READMEs to subfolders
+- [ ] (Maybe) Add transform subscriber for controller world-frame transformations
+- [ ] (Maybe) Consider adding command enqueueing
 
 ---
 
 # Authors
 
-Tyler Wilcox, 
-University of Utah,
+Tyler Wilcox
+University of Utah
+Magnetic and Medical Robotics Laboratory
 tyler.c.wilcox@utah.edu
