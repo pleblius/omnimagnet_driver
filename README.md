@@ -302,7 +302,7 @@ Published when an experiment completes successfully.
 
 ---
 
-# Driver Reset
+## 1. Driver Reset
 
 Service:
 
@@ -343,7 +343,7 @@ ros2 service call /reset_driver omnimagnet_interfaces/srv/DriverReset "{}"
 For requests that desire a specified magnetic dipole, the driver will use the omnimagnets' internal frames to calculate the necessary currents.
 Note: All vectors are converted to unit vectors; strength will be determined by dipole_strength fields.
 
-### 1. Single Magnet Constant
+### 2. Single Magnet Constant
 
 Service:
 
@@ -385,7 +385,7 @@ ros2 service call /single_magnet_constant omnimagnet_interfaces/srv/SingleMagnet
 
 ---
 
-### 2. Single Magnet Rotation
+### 3. Single Magnet Rotation
 
 Service:
 
@@ -435,7 +435,7 @@ ros2 service call /single_magnet_rotation omnimagnet_interfaces/srv/SingleMagnet
 - Phase shift will be in the direction of rotation by `phase_offset` degrees
 ---
 
-### 3. Multi Magnet Constant
+### 4. Multi Magnet Constant
 
 Service:
 
@@ -517,7 +517,7 @@ ros2 service call /multi_magnet_constant omnimagnet_interfaces/srv/MultiMagnetCo
 ```
 ---
 
-### 4. Multi Magnet Rotation
+### 5. Multi Magnet Rotation
 
 Service:
 
@@ -643,7 +643,7 @@ ros2 service call /multi_magnet_rotation omnimagnet_interfaces/srv/MultiMagnetRo
 For requests that desire a specified current through the magnet.
 Note: All vectors are converted to unit vectors; strength will be determined by current_strength fields.
 
-### 1. Single Current Constant
+### 6. Single Current Constant
 
 Service:
 
@@ -685,7 +685,7 @@ ros2 service call /single_current_constant omnimagnet_interfaces/srv/SingleCurre
 
 ---
 
-### 2. Single Current Rotation
+### 7. Single Current Rotation
 
 Service:
 
@@ -735,7 +735,7 @@ ros2 service call /single_current_rotation omnimagnet_interfaces/srv/SingleCurre
 - Phase shift will be in the direction of rotation by `phase_offset` degrees
 ---
 
-### 3. Multi Current Constant
+### 8. Multi Current Constant
 
 Service:
 
@@ -817,7 +817,7 @@ ros2 service call /multi_current_constant omnimagnet_interfaces/srv/MultiCurrent
 ```
 ---
 
-### 4. Multi Current Rotation
+### 9. Multi Current Rotation
 
 Service:
 
