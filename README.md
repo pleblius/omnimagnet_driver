@@ -1042,7 +1042,7 @@ Current code still has several planned improvements:
 
 # Authors
 
-Tyler Wilcox
-University of Utah
-Magnetic and Medical Robotics Laboratory
-tyler.c.wilcox@utah.edu
+Tyler Wilcox  
+University of Utah  
+Magnetic and Medical Robotics Laboratory  
+tyler.c.wilcox@utah.edu  
